@@ -1,0 +1,15 @@
+__pycache__/
+data/
+*.csv
+.setup/
+.venv/
+venv/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite
+*.db
+*.log
+*.zip

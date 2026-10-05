@@ -1,0 +1,19 @@
+"""Small interfaces for platform readers and recorder persistence."""
+
+from datetime import datetime
+from typing import Protocol
+from .models import Activity
+
+
+class ActivityReader(Protocol):
+    def is_locked(self) -> bool | None: ...
+    def read(self) -> Activity | None: ...
+
+
+class RecordingStore(Protocol):
+    def begin(self, activity: Activity, at: datetime, kind: str = "activity",
+              resume_reason: str = "") -> int: ...
+    def checkpoint(self, identifier: int, at: datetime, seconds: float) -> None: ...
+    def finish(self, identifier: int, at: datetime, seconds: float, reason: str = "",
+               interrupted: bool = False) -> None: ...
+    def gap(self, start: datetime, end: datetime) -> None: ...
