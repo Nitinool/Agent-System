@@ -14,7 +14,7 @@ class SyncRepository:
     def __init__(self, store):
         self.store, self.db = store, store.db
         # These auxiliary tables have an independent format and do not rewrite
-        # the application's version-5 tables. Triggers track every edit path.
+        # the application's business tables. Triggers track every edit path.
         with self.db:
             self.db.execute("""CREATE TABLE IF NOT EXISTS sync_entities (
                 uid TEXT PRIMARY KEY, kind TEXT NOT NULL, local_id INTEGER,

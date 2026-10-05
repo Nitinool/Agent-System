@@ -11,6 +11,7 @@ from ..github_sync import GitHubSync
 from ..sync import LocalChanged, REPOSITORY, SyncError, encode, merge
 from ..sync_credentials import TokenStore
 from ..sync_settings import SyncSettings, SyncSettingsStore
+from ..finance import money_text
 
 TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
 STATUS_INTERVAL_MS = 3000
@@ -90,7 +91,7 @@ class SyncController:
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text=REPOSITORY, font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
         ttk.Label(frame, textvariable=self.status).pack(anchor="w", pady=8)
-        ttk.Label(frame, text="同步：求职、事项、今日待办、项目、里程碑和完成记录。\n行为日志保留在本机。", justify="left").pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="同步：求职、事项、今日待办、项目、里程碑、完成记录和财务账目。\n行为日志保留在本机。", justify="left").pack(anchor="w", pady=(0, 12))
         row = ttk.Frame(frame)
         row.pack(fill="x")
         ttk.Label(row, text="GitHub Token：").pack(side="left")
@@ -307,6 +308,7 @@ class SyncController:
         self.app.jobs_panel.refresh()
         self.app.tasks_panel.refresh()
         self.app.projects_panel.refresh()
+        self.app.finance_panel.refresh()
         self.observed = self.repo.snapshot()
         self.remote_state = "已同步"
         self.failures = 0
@@ -347,7 +349,8 @@ def version_text(record, records):
               "category": "分类", "priority": "优先级", "kind": "类型", "project_id": "所属项目",
               "milestone_id": "阶段", "acceptance": "验收条件", "outcome": "成果说明",
               "completed_at": "完成时间", "resume_status": "完成前状态", "days": "待办日期",
-              "completions": "完成记录", "position": "阶段顺序"}
+              "completions": "完成记录", "position": "阶段顺序", "direction": "收支", "amount_cents": "金额",
+              "occurred_on": "交易日期", "side_source": "副业来源", "settled_on": "到账 / 支付日期"}
     lines = []
     for key, value in fields.items():
         if key in ("project_id", "milestone_id"):
@@ -355,6 +358,8 @@ def version_text(record, records):
             value = linked["name"] if linked else ("已删除" if value else "未设置")
         elif key == "days":
             value = "、".join(value)
+        elif key == "amount_cents":
+            value = money_text(value)
         elif key == "completions":
             value = "\n".join(f"{e['completed_at'][:19].replace('T', ' ')} · {e['title']}"
                               + (f" · 重新打开于 {e['reopened_at'][:19].replace('T', ' ')}" if e['reopened_at'] else "") for e in value)

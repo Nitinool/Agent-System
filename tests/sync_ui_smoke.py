@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from activitylog.jobs import ApplicationDraft
+from activitylog.finance import FinanceDraft
 from activitylog.projects import ProjectDraft
 from activitylog.service import ActivityService
 from activitylog.storage import Store
@@ -73,12 +74,15 @@ def main():
                 p = a.service.projects.save(ProjectDraft("界面项目"))
                 t = a.service.tasks.save(TaskDraft("测试事项", "", project_id=p))
                 a.service.jobs.save_application("界面公司", ApplicationDraft("测试岗位", "2026-10-05"))
+                a.service.finance.save(FinanceDraft("收入", "321.09", "2026-10-05", "卖出物品", "副业收入", "二手交易", "待结算"))
                 a.toggle()
                 synchronize(a)
                 assert a.running
                 synchronize(b)
                 assert len(b.jobs_panel.table.get_children()) == 1
                 assert len(b.projects_panel.project_table.get_children()) == 1
+                assert len(b.finance_panel.pending_table.get_children()) == 1
+                assert b.service.finance.snapshot("2026-10").totals.pending == 32109
                 bt = b.service.tasks.repository.unscheduled()[0].id
                 b.service.tasks.complete(bt, True)
                 synchronize(b)

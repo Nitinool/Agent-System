@@ -11,8 +11,9 @@ from .models import Activity, CATEGORIES, Segment, stamp
 from .job_store import JOB_SCHEMA
 from .task_store import TASK_SCHEMA, TASK_V4_MIGRATION, TASK_V5_SCHEMA
 from .project_store import PROJECT_SCHEMA, PROJECT_V5_SCHEMA
+from .finance_store import FINANCE_SCHEMA
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 RECORDING_SCHEMA = (
     """CREATE TABLE segments (
         id INTEGER PRIMARY KEY, start_time TEXT NOT NULL, last_seen TEXT NOT NULL,
@@ -26,7 +27,7 @@ RECORDING_SCHEMA = (
         segment_id INTEGER PRIMARY KEY REFERENCES segments(id) ON DELETE CASCADE,
         category TEXT NOT NULL)""",
 )
-SCHEMA = RECORDING_SCHEMA + JOB_SCHEMA + PROJECT_SCHEMA + TASK_SCHEMA + PROJECT_V5_SCHEMA + TASK_V5_SCHEMA
+SCHEMA = RECORDING_SCHEMA + JOB_SCHEMA + PROJECT_SCHEMA + TASK_SCHEMA + PROJECT_V5_SCHEMA + TASK_V5_SCHEMA + FINANCE_SCHEMA
 
 
 class UnsupportedSchemaError(sqlite3.DatabaseError):
@@ -55,14 +56,16 @@ class Store:
         tables = self.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if version == SCHEMA_VERSION:
             return
-        if version in (1, 2, 3, 4):
+        if version in (1, 2, 3, 4, 5):
             # Add the new feature tables without rewriting recorded activities.
             with self.db:
                 self.db.execute("BEGIN")
-                statements = (() if version == 4 else
+                statements = (() if version in (4, 5) else
                               (JOB_SCHEMA if version == 1 else ()) + PROJECT_SCHEMA
                               + (TASK_V4_MIGRATION if version == 3 else TASK_SCHEMA))
-                statements += PROJECT_V5_SCHEMA + TASK_V5_SCHEMA
+                if version != 5:
+                    statements += PROJECT_V5_SCHEMA + TASK_V5_SCHEMA
+                statements += FINANCE_SCHEMA
                 for statement in statements:
                     self.db.execute(statement)
                 self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

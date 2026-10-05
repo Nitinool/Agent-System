@@ -11,6 +11,7 @@ from .jobs import JobOverview
 from .tasks import TaskOverview
 from .projects import ProjectOverview
 from .sync import SyncController
+from .finance import FinanceOverview
 
 
 class LoggerApp:
@@ -39,6 +40,9 @@ class LoggerApp:
         self.projects_panel = ProjectOverview(self.page_container, service.projects)
         self.pages["projects"] = self.projects_panel
         self.projects_panel.grid(row=0, column=0, sticky="nsew")
+        self.finance_panel = FinanceOverview(self.page_container, service.finance)
+        self.pages["finance"] = self.finance_panel
+        self.finance_panel.grid(row=0, column=0, sticky="nsew")
         tk.Label(self.sidebar, textvariable=self.status, background="#f3f5f9", foreground="#667085",
                  wraplength=120, justify="left", padx=14, pady=12).pack(side="bottom", fill="x")
         self.sync_controller = SyncController(self)
@@ -63,7 +67,7 @@ class LoggerApp:
         tk.Label(self.sidebar, text="我的记录", background="#f3f5f9", foreground="#253246",
                  font=("Microsoft YaHei UI", 13, "bold"), padx=14, pady=16, anchor="w").pack(fill="x")
         self.nav_buttons = {}
-        for page, label in (("records", "记录信息"), ("jobs", "求职一览"), ("tasks", "事项管理"), ("projects", "项目管理")):
+        for page, label in (("records", "记录信息"), ("jobs", "求职一览"), ("tasks", "事项管理"), ("projects", "项目管理"), ("finance", "财务管理")):
             button = tk.Button(self.sidebar, text=label, command=lambda name=page: self.select_page(name),
                                font=("Microsoft YaHei UI", 10), anchor="w", relief="flat", borderwidth=0,
                                background="#f3f5f9", foreground="#344054", activebackground="#e8eef9",
@@ -91,6 +95,8 @@ class LoggerApp:
             self.tasks_panel.refresh()
         elif page == "projects":
             self.projects_panel.refresh()
+        elif page == "finance":
+            self.finance_panel.refresh()
 
     def _build_controls(self, frame):
         ttk.Label(frame, text="我的行为时间线", font=("Microsoft YaHei UI", 19, "bold")).pack(anchor="w")
@@ -371,6 +377,7 @@ class LoggerApp:
         self.jobs_panel.cancel_refresh()
         self.tasks_panel.cancel_refresh()
         self.projects_panel.cancel_refresh()
+        self.finance_panel.cancel_refresh()
         if self.filter_timer is not None:
             self.root.after_cancel(self.filter_timer)
             self.filter_timer = None

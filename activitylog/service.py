@@ -17,6 +17,8 @@ from .task_store import TaskRepository
 from .project_service import ProjectService
 from .project_store import ProjectRepository
 from .sync_store import SyncRepository
+from .finance_store import FinanceRepository
+from .finance_service import FinanceService
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class ActivityService:
         self.jobs = JobService(JobRepository(store.db))
         self.tasks = TaskService(TaskRepository(store.db))
         self.projects = ProjectService(ProjectRepository(store.db), self.tasks)
+        self.finance = FinanceService(FinanceRepository(store.db))
         self.sync = SyncRepository(store)
 
     def capture(self, exclusions: str = "") -> CaptureResult:

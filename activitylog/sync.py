@@ -9,6 +9,7 @@ import re
 from .jobs import APPLICATION_STATUSES
 from .projects import PROJECT_STATUSES
 from .tasks import TASK_CATEGORIES, TASK_KINDS, TASK_PRIORITIES, TASK_STATUSES
+from .finance import INCOME_STATUSES, MAX_AMOUNT_CENTS
 
 REPOSITORY = "Nitinool/Agent-System-data"
 REMOTE_PATH = "sync/records.json"
@@ -20,6 +21,7 @@ FIELDS = {
               "project_id", "resume_status", "milestone_id", "acceptance", "outcome", "completed_at",
               "days", "completions"),
     "job_applications": ("company", "title", "applied_on", "status", "url", "notes"),
+    "finance_entries": ("direction", "amount_cents", "occurred_on", "title", "category", "side_source", "status", "settled_on", "notes"),
 }
 EVENT_FIELDS = {"title", "project_id", "completed_at", "reopened_at"}
 
@@ -67,9 +69,9 @@ def validate(records):
             if not isinstance(fields, dict) or set(fields) != set(FIELDS[kind]):
                 raise ValueError()
             for key, value in fields.items():
-                if key in ("days", "completions", "position"):
+                if key in ("days", "completions", "position", "amount_cents"):
                     continue
-                if key in ("project_id", "milestone_id", "planned_on", "completed_at") and value is None:
+                if key in ("project_id", "milestone_id", "planned_on", "completed_at", "settled_on") and value is None:
                     continue
                 if not isinstance(value, str) or len(value) > 10000:
                     raise ValueError()
@@ -98,6 +100,22 @@ def validate(records):
                         raise ValueError()
             if kind == "milestones" and (type(fields["position"]) is not int or fields["position"] < 0):
                 raise ValueError()
+            if kind == "finance_entries":
+                _day(fields["occurred_on"])
+                if type(fields["amount_cents"]) is not int or not 0 < fields["amount_cents"] <= MAX_AMOUNT_CENTS:
+                    raise ValueError()
+                if (not fields["category"].strip() or len(fields["category"]) > 100
+                        or len(fields["side_source"]) > 100 or fields["side_source"] in ("全部来源", "日常收支")):
+                    raise ValueError()
+                if fields["direction"] == "收入" and fields["status"] in INCOME_STATUSES:
+                    if fields["status"] == "待结算" and (not fields["side_source"].strip() or fields["settled_on"] is not None):
+                        raise ValueError()
+                elif fields["direction"] != "支出" or fields["status"] != "已支付":
+                    raise ValueError()
+                if fields["status"] != "待结算":
+                    _day(fields["settled_on"])
+                    if fields["settled_on"] < fields["occurred_on"]:
+                        raise ValueError()
             if kind == "tasks":
                 for key, choices in (("status", TASK_STATUSES), ("resume_status", TASK_STATUSES[:-1]),
                                      ("kind", TASK_KINDS), ("category", TASK_CATEGORIES), ("priority", TASK_PRIORITIES)):
@@ -144,7 +162,8 @@ def _reference(records, uid, kind, optional):
 
 def encode(records):
     validate(records)
-    content = json.dumps({"format": "agent-system-data", "version": 1, "records": records},
+    version = 2 if any(r["kind"] == "finance_entries" for r in records.values()) else 1
+    content = json.dumps({"format": "agent-system-data", "version": version, "records": records},
                          ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if len(content.encode("utf-8")) > MAX_BYTES:
         raise SyncError("同步数据超过本版 900 KB 上限，需要分批同步；本地数据仍保留。")
@@ -163,9 +182,11 @@ def decode(content):
                 result[key] = value
             return result
         payload = json.loads(content, object_pairs_hook=unique_keys)
-        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] != 1:
+        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2):
             raise ValueError()
         validate(payload["records"])
+        if payload["version"] == 1 and any(r["kind"] == "finance_entries" for r in payload["records"].values()):
+            raise ValueError()
         return payload["records"]
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         raise SyncError("远端同步文件损坏或版本不受支持，未覆盖本地数据。") from error
