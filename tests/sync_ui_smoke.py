@@ -110,7 +110,7 @@ def main():
                 root.after(100, choose_remote)
                 assert resolve_conflict(a.sync_controller.dialog, conflict, records) == "remote"
                 a.sync_controller._close_dialog()
-                assert a.sync_controller.status_timer is None
+                assert a.sync_controller.status_timer is not None  # Sidebar stays live after closing settings.
         finally:
             b.close()
             a.close()

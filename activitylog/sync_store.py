@@ -78,8 +78,8 @@ class SyncRepository:
         row = self.db.execute("SELECT baseline FROM sync_state WHERE repository=?", (REPOSITORY,)).fetchone()
         return json.loads(row[0]) if row else {}
 
-    def status(self):
-        base, local = self.baseline(), self.snapshot()
+    def status(self, snapshot=None):
+        base, local = self.baseline(), self.snapshot() if snapshot is None else snapshot
         pending = sum(base.get(uid) != local.get(uid) for uid in set(base) | set(local))
         row = self.db.execute("SELECT synced_at FROM sync_state WHERE repository=?", (REPOSITORY,)).fetchone()
         return pending, row[0] if row else None
