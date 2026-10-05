@@ -8,6 +8,7 @@ import webbrowser
 
 from ..job_service import JobService
 from ..jobs import APPLICATION_STATUSES, ApplicationDraft, ApplicationRow, application_rows
+from .autocomplete import HistoryCombobox
 
 
 class ApplicationDialog(tk.Toplevel):
@@ -58,7 +59,7 @@ class ApplicationDialog(tk.Toplevel):
     @staticmethod
     def _history_field(body, index, label, variable, values):
         ttk.Label(body, text=label).grid(row=index, column=0, sticky="w", padx=(0, 14), pady=5)
-        combo = ttk.Combobox(body, textvariable=variable, values=values, state="normal", width=48)
+        combo = HistoryCombobox(body, textvariable=variable, values=values, width=48)
         combo.grid(row=index, column=1, sticky="ew", pady=5)
         return combo
 

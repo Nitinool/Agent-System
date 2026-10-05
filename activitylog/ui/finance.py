@@ -4,6 +4,7 @@ from datetime import date
 import sqlite3
 import tkinter as tk
 from tkinter import messagebox, ttk
+from .autocomplete import HistoryCombobox
 
 from ..finance import (EXPENSE_CATEGORIES, INCOME_CATEGORIES, INCOME_STATUSES,
                        FinanceDraft, amount_text, filter_entries, money_text, validate_month)
@@ -38,7 +39,7 @@ class FinanceDialog(tk.Toplevel):
         self._field(body, 3, "说明", self.title_var)
         self.category_combo = self._field(body, 4, "分类 *", self.category_var,
                                           tuple(dict.fromkeys(EXPENSE_CATEGORIES + INCOME_CATEGORIES + categories)))
-        self._field(body, 5, "副业来源（普通收支可留空）", self.source_var, sources)
+        self.source_combo = self._field(body, 5, "副业来源（普通收支可留空）", self.source_var, sources)
         self.status_combo = self._field(body, 6, "结算状态", self.status_var, INCOME_STATUSES, readonly=True)
         self.settled_entry = self._field(body, 7, "实际到账 / 支付日期", self.settled_var)
         ttk.Label(body, text="备注").grid(row=8, column=0, sticky="nw", pady=5)
@@ -67,7 +68,10 @@ class FinanceDialog(tk.Toplevel):
         if values is None:
             field = ttk.Entry(body, textvariable=variable, width=43)
         else:
-            field = ttk.Combobox(body, textvariable=variable, values=values, state="readonly" if readonly else "normal", width=41)
+            if readonly:
+                field = ttk.Combobox(body, textvariable=variable, values=values, state="readonly", width=41)
+            else:
+                field = HistoryCombobox(body, textvariable=variable, values=values, width=41)
         field.grid(row=row, column=1, sticky="ew", pady=5)
         return field
 
