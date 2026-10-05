@@ -22,6 +22,26 @@ python activity_logger.py
 
 两台电脑轮流开发的流程见 [开发交接.md](开发交接.md)：通过 [Agent-System](https://github.com/Nitinool/Agent-System) 仓库同步代码和交接文档，每台电脑分别安装 Python。本地日志和数据库不进入仓库。
 
+## 两台电脑同步数据
+
+源代码与运行数据使用两个仓库：代码在 Agent-System；手动录入的数据在私有仓库 [Agent-System-data](https://github.com/Nitinool/Agent-System-data)。每台电脑的 SQLite 数据库仍在本机。另一台电脑只需克隆代码仓库、安装 Python、启动软件，再使用“数据同步”获取共享记录，不需要手动复制数据库或克隆数据仓库。
+
+1. 更新代码后关闭旧窗口，重新启动。点击左侧底部“数据同步…”。
+2. 点击“创建 Token”，在 GitHub 创建 Fine-grained personal access token。Repository access 仅选择 **Agent-System-data**，Repository permissions 的 **Contents** 选择 **Read and write**；Metadata 保留默认读取权限。令牌可设到期时间。
+3. 将 Token 填入软件，点击“立即同步”。勾选“在本机记住”后，凭据使用 Windows DPAPI 按当前用户加密，保存在忽略提交的 `data/sync-token.dpapi`，不进入两个 GitHub 仓库。也可以不勾选，仅在本次运行使用。
+4. 另一台电脑同样配置一次 Token，推荐每台分别创建。之后输入框留空即可复用已保存的凭据；更换 Windows 用户或电脑时重新配置，不复制 Token 文件。
+5. 换电脑前同步一次；另一台电脑打开后先同步，再录入数据。离线时仍能正常使用，联网后再手动同步。
+
+首次交付已使用已连接的 GitHub 服务把本机当前共享记录上传到私有仓库，并记录同步基线。**软件自身的访问权限仍需按上述步骤在每台电脑配置**，它不会使用 Codex 连接器的登录凭据。
+
+同步范围：求职投递（含公司、岗位、链接和备注）、事项、各日期的今日待办关联、项目、里程碑、验收与成果说明、真实完成和重新打开记录。公司名称随投递记录同步，空公司的下拉历史仅保留在本机。前台窗口行为日志、活动分类和 CSV 不同步。
+
+每条记录使用全局编号，删除保留标记。同一条记录两边都修改时，显示本机 / 远端版本，逐条选择保留哪份，也可以取消整次同步；事项的待办日期和完成历史与事项一起选择。独立新增记录可以合并；分别新建的同名项目会停止同步并提示先改名，避免误合并两个项目。远端写入使用文件 SHA 检查，遇到并发修改或网络超时可重新点击同步。若上传期间本地发生修改，软件保留本地内容及旧基线，要求再次同步。
+
+界面显示待同步记录数和上次完成时间。接收改变前自动备份到 `data/backups/before-sync-*.sqlite3`；导入、关联检查和同步基线在同一事务内完成，写入失败回滚。请通过软件删除记录，不手动覆盖 `sync/records.json` 或删掉标记；删除同步不会清除 Git 历史里的旧版本。仓库必须为私有，读取与上传前都会检查。
+
+第一版仅手动同步，单个 JSON 文件上限 900 KB，超过时停止同步并保留本地数据；尚未实现定时同步、行为日志分批上传、附件或远端历史恢复界面。GitHub Token 与 Contents API 的权限说明见 [GitHub 官方文档](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)。
+
 ## 按天查看和统计
 
 - 日期默认今天。使用“前一天”“后一天”“今天”，或输入 `YYYY-MM-DD` 后点击“查看” / 按回车。
@@ -115,7 +135,7 @@ python activity_logger.py
 - 查询 Windows 当前会话的锁定和连接状态；锁屏 / 断开期间单独记录，不计入应用前台停留。状态查询不可用时，结束当前应用段并等待恢复。
 - 采样间隔超过 5 秒时，切断前后时间段，空白显示“睡眠 / 采集间隔”。系统时间发生跳变也会切断时间段。空白不归属任何应用。
 - 数据保存在本目录的 `data/activity.sqlite3`（CSV 为 UTF-8 BOM，适合 Excel 查看）。
-- 不采集键盘内容、截图、网页正文或浏览器 URL；没有上传功能，没有自动启动和隐藏后台服务。
+- 不采集键盘内容、截图、网页正文或浏览器 URL；行为日志不上传。手动录入的数据可通过“数据同步”上传到指定私有仓库；没有自动启动和隐藏后台服务。
 
 ## 局限
 
@@ -141,6 +161,7 @@ python tests/job_ui_smoke.py
 python tests/task_ui_smoke.py
 python tests/project_ui_smoke.py
 python tests/milestone_ui_smoke.py
+python tests/sync_ui_smoke.py
 ```
 
 可以手动记录一分钟后按 `Win+L` 锁屏，解锁后检查：前后应用是两个时间段，中间出现锁屏记录。实际睡眠恢复还需结合本机电源模式验证。
@@ -185,9 +206,12 @@ Win32 读取依据：
 | `ui/tasks.py`、`ui/calendar.py`、`ui/today.py` | 事项页面与编辑窗口、月历、可滚动的今日清单 |
 | `ui/projects.py`、`ui/milestone_editor.py`、`ui/task_editor.py`、`ui/priority.py` | 项目阶段与事项、里程碑及共享事项编辑器、统一优先级圆点 |
 | `demo_project.py` | 首个 demo 优化计划的显式、幂等初始化 |
+| `sync.py`、`sync_store.py` | 同步格式验证、三方合并、全局编号、删除标记、基线和事务导入 |
+| `github_sync.py`、`sync_credentials.py` | GitHub Contents API、私有仓库检查、SHA 并发保护和本机 Windows 凭据加密 |
+| `ui/sync.py` | 手动同步设置、后台网络任务和逐条冲突选择 |
 
 依赖方向是“界面 → 应用服务 → 核心逻辑与存储”。Windows 读取器在启动时注入服务，核心逻辑不导入 Tkinter 或 Windows API。列表汇总与图表使用同一份每日快照，列表筛选不会修改全天统计。
 
 增加活动分类时修改 `models.CATEGORIES` 和图表配色；调整采集边界时修改 `CapturePolicy`；调整刷新或合并阈值时修改 `ViewPolicy`。更换平台采集方式时实现 `ActivityReader`，更换采集存储时实现 `RecordingStore`。采集器支持注入时钟和进程编号，便于用固定样本测试。
 
-新增离线生活记录或分类规则时，优先放在应用服务和独立业务模块中，再由界面调用。当前数据库格式版本为 4，版本 1、2 会通过事务新增缺少的功能表，版本 3 会新增项目表并扩展事项结构。升级失败时完整回滚，当前数据保留；其他不受支持的版本会拒绝打开。
+新增离线生活记录或分类规则时，优先放在应用服务和独立业务模块中，再由界面调用。业务数据库格式为 5，版本 1–4 会通过事务升级；其他不受支持的版本会拒绝打开。同步使用独立的版本 1 文件格式和 `sync_entities` / `sync_state` 辅助表，应用服务初始化时补齐编号及插入、删除触发器，不改写现有业务表。

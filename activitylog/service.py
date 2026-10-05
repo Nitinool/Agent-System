@@ -16,6 +16,7 @@ from .task_service import TaskService
 from .task_store import TaskRepository
 from .project_service import ProjectService
 from .project_store import ProjectRepository
+from .sync_store import SyncRepository
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class ActivityService:
         self.jobs = JobService(JobRepository(store.db))
         self.tasks = TaskService(TaskRepository(store.db))
         self.projects = ProjectService(ProjectRepository(store.db), self.tasks)
+        self.sync = SyncRepository(store)
 
     def capture(self, exclusions: str = "") -> CaptureResult:
         excluded = {name.strip().lower() for name in exclusions.replace("，", ",").split(",") if name.strip()}

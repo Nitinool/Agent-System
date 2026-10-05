@@ -10,6 +10,7 @@ from .charts import DailyCharts
 from .jobs import JobOverview
 from .tasks import TaskOverview
 from .projects import ProjectOverview
+from .sync import SyncController
 
 
 class LoggerApp:
@@ -40,6 +41,7 @@ class LoggerApp:
         self.projects_panel.grid(row=0, column=0, sticky="nsew")
         tk.Label(self.sidebar, textvariable=self.status, background="#f3f5f9", foreground="#667085",
                  wraplength=120, justify="left", padx=14, pady=12).pack(side="bottom", fill="x")
+        self.sync_controller = SyncController(self)
         self.select_page("records")
         self.refresh()
         for variable in (self.filter_keyword, self.filter_app, self.filter_category):
@@ -364,6 +366,7 @@ class LoggerApp:
                                 f"{detail}\n\n{row.title}", parent=self.root)
 
     def close(self):
+        self.sync_controller.close()
         self._stop_scheduling()
         self.jobs_panel.cancel_refresh()
         self.tasks_panel.cancel_refresh()
