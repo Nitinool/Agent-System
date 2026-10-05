@@ -1,6 +1,7 @@
 """Stable identities, deletion tracking and atomic imports on the UI-owned DB."""
 
 from datetime import datetime
+from contextlib import closing
 import json
 import sqlite3
 
@@ -93,7 +94,8 @@ class SyncRepository:
             backups = self.store.path.parent / "backups"
             backups.mkdir(exist_ok=True)
             path = backups / f"before-sync-{datetime.now():%Y%m%d-%H%M%S-%f}.sqlite3"
-            with sqlite3.connect(path) as target:
+            # SQLite's context manager ends transactions but leaves files open.
+            with closing(sqlite3.connect(path)) as target:
                 self.db.backup(target)
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")

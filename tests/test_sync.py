@@ -264,6 +264,49 @@ class Devices(unittest.TestCase):
         self.assertEqual(self.b.sync.snapshot(), before)
         self.assertEqual(self.b.sync.baseline(), before)
 
+    def test_backup_preserves_original_data_and_releases_file(self):
+        self._check_backup_released(fail_import=False)
+
+    def test_failed_import_preserves_backup_and_releases_file(self):
+        self._check_backup_released(fail_import=True)
+
+    def _check_backup_released(self, *, fail_import):
+        identifier = self.a.tasks.save(TaskDraft("同步前标题", ""))
+        before = self.a.sync.snapshot()
+        modified = deepcopy(before)
+        next(iter(modified.values()))["fields"]["title"] = "同步后标题"
+        connections = []
+        connect = sqlite3.connect
+
+        def track_connection(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            # Keep a reference so garbage collection cannot mask an open handle.
+            connections.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+
+        with patch("activitylog.sync_store.sqlite3.connect", side_effect=track_connection):
+            if fail_import:
+                with patch.object(self.a.sync, "_import", side_effect=sqlite3.OperationalError("模拟导入失败")):
+                    with self.assertRaises(sqlite3.OperationalError):
+                        self.a.sync.apply(before, modified)
+            else:
+                self.a.sync.apply(before, modified)
+
+        self.assertEqual(len(connections), 1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connections[0].execute("SELECT 1")
+        backup, = (Path(self.directory.name) / "backups").glob("*.sqlite3")
+        renamed = backup.with_name("released.sqlite3")
+        backup.rename(renamed)
+        target = connect(renamed)
+        try:
+            self.assertEqual(target.execute("SELECT title FROM tasks WHERE id=?", (identifier,)).fetchone()[0], "同步前标题")
+            self.assertEqual(target.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            target.close()
+        self.assertEqual(self.a.sync.snapshot(), before if fail_import else modified)
+
     def test_behavior_logs_never_enter_payload_and_identity_survives_restart(self):
         from datetime import datetime
         now = datetime.now().astimezone()
@@ -321,6 +364,7 @@ class TransportTests(unittest.TestCase):
         missing = HTTPError("https://api.github.com", 404, "missing", {}, None)
         transport = GitHubSync("test-only-token", opener=FakeOpener({"private": True, "default_branch": "main"}, missing))
         self.assertEqual(transport.fetch(), ({}, None))
+        self.assertTrue(missing.closed)
         with self.assertRaises(SyncError):
             GitHubSync("test-only-token", opener=FakeOpener(missing)).fetch()
 
@@ -330,6 +374,7 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(RemoteChanged) as context:
             transport.publish({}, "a" * 40)
         self.assertNotIn("test-only-token", str(context.exception))
+        self.assertTrue(error.closed)
         transport = GitHubSync("test-only-token", opener=FakeOpener(URLError("test-only-token")))
         with self.assertRaises(SyncError) as context:
             transport.fetch()

@@ -36,13 +36,16 @@ class GitHubSync:
                     raise SyncError("GitHub 返回的数据过大，本次同步已停止。")
                 return json.loads(content)
         except HTTPError as error:
-            if error.code == 404:
-                raise SyncError("仓库或文件不可访问，请检查 Token 的仓库权限。") from None
-            if error.code in (409, 422):
-                raise RemoteChanged("远端已更新或拒绝本次提交，请重新同步以获取最新内容。") from None
-            if error.code in (401, 403):
-                raise SyncError("GitHub 拒绝访问，请检查 Token 是否过期、写入权限和 API 限额。") from None
-            raise SyncError(f"GitHub 请求失败（HTTP {error.code}），请稍后重试。") from None
+            try:
+                if error.code == 404:
+                    raise SyncError("仓库或文件不可访问，请检查 Token 的仓库权限。") from None
+                if error.code in (409, 422):
+                    raise RemoteChanged("远端已更新或拒绝本次提交，请重新同步以获取最新内容。") from None
+                if error.code in (401, 403):
+                    raise SyncError("GitHub 拒绝访问，请检查 Token 是否过期、写入权限和 API 限额。") from None
+                raise SyncError(f"GitHub 请求失败（HTTP {error.code}），请稍后重试。") from None
+            finally:
+                error.close()
         except (URLError, TimeoutError, OSError):
             raise SyncError("连接 GitHub 失败或超时，本地数据仍保留，请稍后重试。") from None
         except (ValueError, TypeError):
