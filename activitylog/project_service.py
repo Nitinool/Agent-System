@@ -4,9 +4,9 @@ import sqlite3
 from datetime import datetime
 
 from .project_store import ProjectRepository
-from .projects import PROJECT_STATUSES, MilestoneDraft, Project, ProjectDraft, ProjectSummary
+from .projects import PROJECT_STATUSES, PROJECT_MODES, LANE_STATUS, MilestoneDraft, Project, ProjectDraft, ProjectSummary
 from .task_service import TaskService
-from .tasks import TASK_STATUSES, Task
+from .tasks import TASK_STATUSES, TASK_PRIORITIES, Task
 
 
 class ProjectService:
@@ -33,13 +33,28 @@ class ProjectService:
             raise ValueError("项目目标最多 2000 个字符。")
         if draft.status not in PROJECT_STATUSES:
             raise ValueError("请选择列表中的项目状态。")
+        if draft.priority not in TASK_PRIORITIES or draft.mode not in PROJECT_MODES:
+            raise ValueError("请选择有效的项目优先级和类型。")
         try:
-            return self.repository.save(ProjectDraft(name, draft.goal.strip(), draft.status), identifier)
+            return self.repository.save(ProjectDraft(name, draft.goal.strip(), draft.status, draft.priority, draft.mode), identifier)
         except sqlite3.IntegrityError as error:
             raise ValueError("同名项目已经存在，请使用其他名称。") from error
 
     def delete(self, identifier: int) -> None:
         self.repository.delete(identifier)
+
+    def update(self, identifier, **changes):
+        project = self.get(identifier)
+        values = {key: getattr(project, key) for key in ("name", "goal", "status", "priority", "mode")}
+        if set(changes) - set(values):
+            raise ValueError("项目字段无效。")
+        values.update(changes)
+        return self.save(ProjectDraft(**values), identifier)
+
+    def set_lane(self, identifier, lane):
+        if lane not in LANE_STATUS:
+            raise ValueError("请选择有效的项目分组。")
+        return self.update(identifier, status=LANE_STATUS[lane])
 
     def milestones(self, project_id: int):
         return self.repository.milestones(project_id)

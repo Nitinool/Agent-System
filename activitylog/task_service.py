@@ -45,6 +45,10 @@ class TaskService:
             raise ValueError("事项名称最多 120 个字符。")
         try:
             planned_on = date.fromisoformat(draft.planned_on.strip()).isoformat() if draft.planned_on.strip() else ""
+            start = date.fromisoformat(draft.range_start).isoformat() if draft.range_start else ""
+            end = date.fromisoformat(draft.range_end).isoformat() if draft.range_end else ""
+            if bool(start) != bool(end) or (start and end < start):
+                raise ValueError()
         except ValueError as error:
             raise ValueError("安排日期请使用 YYYY-MM-DD，例如 2026-10-04。") from error
         if draft.category not in TASK_CATEGORIES:
@@ -63,7 +67,8 @@ class TaskService:
             raise ValueError("验收条件最多 2000 个字符，成果说明最多 10000 个字符。")
         today = self.today()
         valid = replace(draft, title=title, planned_on=planned_on or (today.isoformat() if in_today else ""),
-                        notes=draft.notes.strip(), acceptance=draft.acceptance.strip(), outcome=draft.outcome.strip())
+                        notes=draft.notes.strip(), acceptance=draft.acceptance.strip(), outcome=draft.outcome.strip(),
+                        range_start=start, range_end=end)
         return self.repository.save(valid, identifier, today, in_today)
 
     def add_today(self, title: str) -> int:
@@ -85,3 +90,26 @@ class TaskService:
 
     def delete(self, identifier: int) -> None:
         self.repository.delete(identifier)
+
+    def update(self, identifier, **changes):
+        task = self.get(identifier)
+        fields = {key: getattr(task, key) for key in TaskDraft.__dataclass_fields__}
+        for key in ('planned_on', 'range_start', 'range_end'):
+            fields[key] = fields[key].isoformat() if fields[key] else ""
+        if set(changes) - set(fields):
+            raise ValueError("事项字段无效。")
+        fields.update(changes)
+        return self.save(TaskDraft(**fields), identifier, in_today=self.is_in_today(identifier))
+
+    def schedule(self, identifier, start="", end=""):
+        try:
+            if start:
+                start = date.fromisoformat(start).isoformat()
+                end = date.fromisoformat(end or start).isoformat()
+                if end < start:
+                    raise ValueError()
+            elif end:
+                raise ValueError()
+        except (ValueError, TypeError) as error:
+            raise ValueError("请填写有效的起止日期（YYYY-MM-DD），结束日期不能早于开始日期。") from error
+        self.repository.schedule(identifier, start or None, end or None)

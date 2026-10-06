@@ -4,6 +4,7 @@ from datetime import date, datetime
 import sqlite3
 
 from .tasks import Task, TaskDraft
+from .projects import project_code
 
 TASK_SCHEMA_V3 = (
     """CREATE TABLE tasks (
@@ -65,17 +66,27 @@ TASK_V5_SCHEMA = (
 TASK_ORDER = """status='已完成', CASE priority WHEN '紧急' THEN 0 WHEN '高' THEN 1
     WHEN '普通' THEN 2 ELSE 3 END, id"""
 
+TASK_V7_SCHEMA = (
+    "ALTER TABLE tasks ADD COLUMN range_start TEXT",
+    "ALTER TABLE tasks ADD COLUMN range_end TEXT",
+    """CREATE TABLE task_day_exclusions(task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        day TEXT NOT NULL, PRIMARY KEY(task_id,day))""",
+)
+
 
 class TaskRepository:
     def __init__(self, db: sqlite3.Connection):
         self.db = db
 
-    @staticmethod
-    def _task(row: sqlite3.Row) -> Task:
+    def _task(self, row: sqlite3.Row) -> Task:
+        project = self.db.execute("SELECT project_key FROM projects WHERE id=?", (row['project_id'],)).fetchone()
         return Task(row["id"], row["title"], date.fromisoformat(row["planned_on"]) if row["planned_on"] else None,
                     row["category"], row["notes"], row["status"], row["priority"], row["kind"],
                     row["project_id"], row["resume_status"], row["milestone_id"], row["acceptance"],
-                    row["outcome"], row["completed_at"])
+                    row["outcome"], row["completed_at"],
+                    date.fromisoformat(row['range_start']) if row['range_start'] else None,
+                    date.fromisoformat(row['range_end']) if row['range_end'] else None,
+                    project_code(project[0]) if project else "")
 
     def get(self, identifier: int) -> Task:
         row = self.db.execute("SELECT * FROM tasks WHERE id=?", (identifier,)).fetchone()
@@ -85,16 +96,20 @@ class TaskRepository:
 
     def between(self, first: date, last: date) -> tuple[Task, ...]:
         rows = self.db.execute(f"""SELECT * FROM tasks WHERE planned_on BETWEEN ? AND ?
-            ORDER BY planned_on, {TASK_ORDER}""", (first.isoformat(), last.isoformat()))
+            OR (range_start<=? AND range_end>=?) ORDER BY planned_on, {TASK_ORDER}""",
+            (first.isoformat(), last.isoformat(), last.isoformat(), first.isoformat()))
         return tuple(self._task(row) for row in rows)
 
     def day_tasks(self, day: date) -> tuple[Task, ...]:
         rows = self.db.execute(f"""SELECT t.* FROM tasks t WHERE t.id IN
-            (SELECT task_id FROM task_day_entries WHERE day=?) ORDER BY {TASK_ORDER}""", (day.isoformat(),))
+            (SELECT task_id FROM task_day_entries WHERE day=?) OR
+            (t.range_start<=? AND t.range_end>=? AND t.status!='已完成' AND NOT EXISTS
+             (SELECT 1 FROM task_day_exclusions e WHERE e.task_id=t.id AND e.day=?))
+            ORDER BY {TASK_ORDER}""", (day.isoformat(),) * 4)
         return tuple(self._task(row) for row in rows)
 
     def unscheduled(self) -> tuple[Task, ...]:
-        rows = self.db.execute(f"SELECT * FROM tasks WHERE planned_on IS NULL ORDER BY {TASK_ORDER}")
+        rows = self.db.execute(f"SELECT * FROM tasks WHERE planned_on IS NULL AND range_start IS NULL ORDER BY {TASK_ORDER}")
         return tuple(self._task(row) for row in rows)
 
     def project_tasks(self, identifier: int, keyword: str, status: str) -> tuple[Task, ...]:
@@ -110,8 +125,7 @@ class TaskRepository:
         return self.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
 
     def is_on_day(self, identifier: int, day: date) -> bool:
-        return self.db.execute("SELECT 1 FROM task_day_entries WHERE task_id=? AND day=?",
-                               (identifier, day.isoformat())).fetchone() is not None
+        return any(task.id == identifier for task in self.day_tasks(day))
 
     def save(self, draft: TaskDraft, identifier: int | None, today: date,
              in_today: bool) -> int:
@@ -132,18 +146,22 @@ class TaskRepository:
                 resume = status
             values = (draft.title, draft.planned_on or None, draft.category, draft.notes,
                       status, draft.priority, draft.kind, draft.project_id, resume,
-                      draft.milestone_id, draft.acceptance, draft.outcome)
+                      draft.milestone_id, draft.acceptance, draft.outcome, draft.range_start or None, draft.range_end or None)
             if identifier is None:
                 cursor = self.db.execute("""INSERT INTO tasks
                     (title, planned_on, category, notes, status, priority, kind, project_id, resume_status,
-                    milestone_id, acceptance, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", values)
+                    milestone_id, acceptance, outcome, range_start, range_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", values)
                 identifier = cursor.lastrowid
             else:
                 cursor = self.db.execute("""UPDATE tasks SET title=?, planned_on=?, category=?, notes=?,
                     status=?, priority=?, kind=?, project_id=?, resume_status=?,
-                    milestone_id=?, acceptance=?, outcome=? WHERE id=?""", values + (identifier,))
+                    milestone_id=?, acceptance=?, outcome=?, range_start=?, range_end=? WHERE id=?""", values + (identifier,))
                 if not cursor.rowcount:
                     raise ValueError("事项已不存在，请刷新后重试。")
+            if previous and (draft.range_start, draft.range_end) != (
+                    previous.range_start.isoformat() if previous.range_start else '',
+                    previous.range_end.isoformat() if previous.range_end else ''):
+                self.db.execute('DELETE FROM task_day_exclusions WHERE task_id=?', (identifier,))
             self._set_membership(identifier, today, in_today)
             self._record_transition(self.get(identifier), previous.status if previous else None)
             self._invalidate_milestone(draft.milestone_id)
@@ -152,6 +170,16 @@ class TaskRepository:
         return identifier
 
     def _set_membership(self, identifier: int, day: date, included: bool) -> None:
+        task = self.get(identifier)
+        if task.range_start and task.range_start <= day <= task.range_end:
+            self.db.execute("DELETE FROM task_day_entries WHERE task_id=? AND day=?", (identifier, day.isoformat()))
+            if task.completed:
+                return
+            if included:
+                self.db.execute("DELETE FROM task_day_exclusions WHERE task_id=? AND day=?", (identifier, day.isoformat()))
+            else:
+                self.db.execute("INSERT OR IGNORE INTO task_day_exclusions(task_id,day) VALUES(?,?)", (identifier, day.isoformat()))
+            return
         if included:
             self.db.execute("INSERT OR IGNORE INTO task_day_entries(task_id, day) VALUES (?, ?)",
                             (identifier, day.isoformat()))
@@ -165,6 +193,14 @@ class TaskRepository:
             if included and task.planned_on is None:
                 self.db.execute("UPDATE tasks SET planned_on=? WHERE id=?", (day.isoformat(), identifier))
             self._set_membership(identifier, day, included)
+
+    def schedule(self, identifier, start, end):
+        with self.db:
+            self.get(identifier)
+            self.db.execute("UPDATE tasks SET planned_on=?, range_start=?, range_end=? WHERE id=?",
+                            (start, start, end, identifier))
+            self.db.execute("DELETE FROM task_day_exclusions WHERE task_id=?", (identifier,))
+            self.db.execute("DELETE FROM task_day_entries WHERE task_id=? AND day BETWEEN ? AND ?", (identifier, start, end))
 
     def complete(self, identifier: int, completed: bool) -> None:
         with self.db:

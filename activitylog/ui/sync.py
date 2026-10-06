@@ -145,6 +145,9 @@ class SyncController:
         if not self.closed and not self.busy and (self.settings.check_on_start or self.settings.auto_sync):
             self.start(automatic=True, check_only=not self.settings.auto_sync)
 
+    def _editing(self):
+        return self.root.grab_current() is not None or self.app.projects_panel.inline_editing()
+
     def _watch_status(self):
         self.status_timer = None
         if self.closed:
@@ -157,7 +160,7 @@ class SyncController:
                 self.changed_at = now
             pending = self.update_status(snapshot)
             if (self.settings.auto_sync and not self.busy and not self.automatic_paused
-                    and self.root.grab_current() is None
+                    and not self._editing()
                     and now >= self.retry_at and now - self.changed_at >= AUTO_IDLE_SECONDS
                     and (pending or now >= self.next_remote_check)):
                 self.start(automatic=True)
@@ -180,6 +183,11 @@ class SyncController:
 
     def start(self, *, automatic=False, check_only=False):
         if self.closed or self.busy:
+            return
+        if automatic and self._editing():
+            return
+        if not automatic and not self.app.projects_panel.flush_edits():
+            self.notice.set('项目编辑尚未保存，请先修正输入后再同步。')
             return
         if self.startup_timer is not None:
             self.root.after_cancel(self.startup_timer)
@@ -267,7 +275,7 @@ class SyncController:
             self._set_busy(False)
             self.update_status()
             return
-        if self.operation_automatic and self.root.grab_current() is not None:
+        if self.app.projects_panel.has_drafts() or (self.operation_automatic and self._editing()):
             raise LocalChanged("正在编辑，本次自动同步已延后；关闭编辑窗口后会重试。")
         combined, conflicts = merge(self.base, self.local, remote)
         if conflicts and self.operation_automatic:
@@ -302,7 +310,7 @@ class SyncController:
             self._background(lambda: self.transport.publish(combined, sha), self._published)
 
     def _published(self, _result):
-        if self.operation_automatic and self.root.grab_current() is not None:
+        if self.app.projects_panel.has_drafts() or (self.operation_automatic and self._editing()):
             raise LocalChanged("正在编辑，本地未覆盖；关闭编辑窗口后会重新同步。")
         self.repo.apply(self.local, self.combined)
         self.app.jobs_panel.refresh()
@@ -350,13 +358,14 @@ def version_text(record, records):
               "milestone_id": "阶段", "acceptance": "验收条件", "outcome": "成果说明",
               "completed_at": "完成时间", "resume_status": "完成前状态", "days": "待办日期",
               "completions": "完成记录", "position": "阶段顺序", "direction": "收支", "amount_cents": "金额",
-              "occurred_on": "交易日期", "side_source": "副业来源", "settled_on": "到账 / 支付日期"}
+              "occurred_on": "交易日期", "side_source": "副业来源", "settled_on": "到账 / 支付日期",
+              "mode": "项目类型", "range_start": "安排开始", "range_end": "安排结束", "excluded_days": "跳过日期"}
     lines = []
     for key, value in fields.items():
         if key in ("project_id", "milestone_id"):
             linked = records.get(value, {}).get("fields")
             value = linked["name"] if linked else ("已删除" if value else "未设置")
-        elif key == "days":
+        elif key in ("days", "excluded_days"):
             value = "、".join(value)
         elif key == "amount_cents":
             value = money_text(value)

@@ -19,6 +19,15 @@ PROJECT_V5_SCHEMA = (
     "CREATE INDEX milestone_projects ON milestones(project_id, position)",
 )
 
+PROJECT_V7_SCHEMA = (
+    "ALTER TABLE projects ADD COLUMN priority TEXT NOT NULL DEFAULT '普通'",
+    "ALTER TABLE projects ADD COLUMN mode TEXT NOT NULL DEFAULT '目标型'",
+    "ALTER TABLE projects ADD COLUMN project_key TEXT",
+    "CREATE UNIQUE INDEX project_keys ON projects(project_key)",
+    """CREATE TRIGGER project_identity AFTER INSERT ON projects WHEN NEW.project_key IS NULL
+        BEGIN UPDATE projects SET project_key=COALESCE(project_key, lower(hex(randomblob(16)))) WHERE id=NEW.id; END""",
+)
+
 
 class ProjectRepository:
     def __init__(self, db: sqlite3.Connection):
@@ -26,7 +35,7 @@ class ProjectRepository:
 
     @staticmethod
     def _project(row) -> Project:
-        return Project(row["id"], row["name"], row["goal"], row["status"])
+        return Project(row["id"], row["name"], row["goal"], row["status"], row["priority"], row["mode"], row["project_key"] or "")
 
     def summaries(self) -> tuple[ProjectSummary, ...]:
         rows = self.db.execute("""SELECT p.*, COUNT(t.id) AS total,
@@ -47,11 +56,11 @@ class ProjectRepository:
     def save(self, draft: ProjectDraft, identifier: int | None = None) -> int:
         with self.db:
             if identifier is None:
-                cursor = self.db.execute("INSERT INTO projects(name, name_key, goal, status) VALUES (?, ?, ?, ?)",
-                                         (draft.name, draft.name.casefold(), draft.goal, draft.status))
+                cursor = self.db.execute("INSERT INTO projects(name, name_key, goal, status, priority, mode) VALUES (?, ?, ?, ?, ?, ?)",
+                                         (draft.name, draft.name.casefold(), draft.goal, draft.status, draft.priority, draft.mode))
                 return cursor.lastrowid
-            cursor = self.db.execute("UPDATE projects SET name=?, name_key=?, goal=?, status=? WHERE id=?",
-                                     (draft.name, draft.name.casefold(), draft.goal, draft.status, identifier))
+            cursor = self.db.execute("UPDATE projects SET name=?, name_key=?, goal=?, status=?, priority=?, mode=? WHERE id=?",
+                                     (draft.name, draft.name.casefold(), draft.goal, draft.status, draft.priority, draft.mode, identifier))
             if not cursor.rowcount:
                 raise ValueError("项目已不存在，请刷新后重试。")
         return identifier

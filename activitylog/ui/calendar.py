@@ -33,7 +33,9 @@ class MonthCalendar(tk.Canvas):
         self.days = month_days(year, month)
         self.by_day = {}
         for task in tasks:
-            self.by_day.setdefault(task.planned_on, []).append(task)
+            for day in self.days:
+                if day and (day == task.planned_on or (task.range_start and task.range_start <= day <= task.range_end)):
+                    self.by_day.setdefault(day, []).append(task)
         self.redraw()
 
     def _geometry(self):

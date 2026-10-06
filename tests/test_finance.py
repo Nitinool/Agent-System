@@ -148,6 +148,14 @@ class FinanceMigrationTests(unittest.TestCase):
             app.sync.apply(before, before)
             with app.store.db:
                 app.store.db.execute("DROP TABLE finance_entries")
+                app.store.db.execute('DROP TRIGGER sync_insert_projects')
+                app.store.db.execute('DROP TRIGGER project_identity')
+                app.store.db.execute('DROP INDEX project_keys')
+                for column in ('priority', 'mode', 'project_key'):
+                    app.store.db.execute(f'ALTER TABLE projects DROP COLUMN {column}')
+                for column in ('range_start', 'range_end'):
+                    app.store.db.execute(f'ALTER TABLE tasks DROP COLUMN {column}')
+                app.store.db.execute('DROP TABLE task_day_exclusions')
                 app.store.db.execute("PRAGMA user_version=5")
             return before
         finally:

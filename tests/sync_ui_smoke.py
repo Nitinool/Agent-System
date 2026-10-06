@@ -80,7 +80,7 @@ def main():
                 assert a.running
                 synchronize(b)
                 assert len(b.jobs_panel.table.get_children()) == 1
-                assert len(b.projects_panel.project_table.get_children()) == 1
+                assert sum(len(b.projects_panel.project_table.get_children(group)) for group in b.projects_panel.project_table.get_children()) == 1
                 assert len(b.finance_panel.pending_table.get_children()) == 1
                 assert b.service.finance.snapshot("2026-10").totals.pending == 32109
                 bt = b.service.tasks.repository.unscheduled()[0].id

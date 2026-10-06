@@ -47,7 +47,8 @@ class TodayList(ttk.Frame):
             dot.create_oval(2, 6, 10, 14, fill=priority_color(task.priority, task.completed), outline="")
             dot.grid(row=0, column=0, sticky="n", pady=(3, 0))
             variable = tk.BooleanVar(value=task.completed)
-            check = tk.Checkbutton(row, text=task.title, variable=variable, anchor="w", justify="left",
+            title = f"[{task.project_code}] {task.title}" if task.project_code else task.title
+            check = tk.Checkbutton(row, text=title, variable=variable, anchor="w", justify="left",
                                   wraplength=max(150, self.canvas.winfo_width() - 42),
                                   font=("Microsoft YaHei UI", 10, "overstrike" if task.completed else "normal"),
                                   background=background, activebackground=background,

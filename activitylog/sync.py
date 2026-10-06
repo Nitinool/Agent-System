@@ -7,7 +7,7 @@ import json
 import re
 
 from .jobs import APPLICATION_STATUSES
-from .projects import PROJECT_STATUSES
+from .projects import PROJECT_STATUSES, PROJECT_MODES
 from .tasks import TASK_CATEGORIES, TASK_KINDS, TASK_PRIORITIES, TASK_STATUSES
 from .finance import INCOME_STATUSES, MAX_AMOUNT_CENTS
 
@@ -24,6 +24,24 @@ FIELDS = {
     "finance_entries": ("direction", "amount_cents", "occurred_on", "title", "category", "side_source", "status", "settled_on", "notes"),
 }
 EVENT_FIELDS = {"title", "project_id", "completed_at", "reopened_at"}
+LEGACY_FIELDS = dict(FIELDS)
+FIELDS['projects'] += ('priority', 'mode')
+FIELDS['tasks'] += ('range_start', 'range_end', 'excluded_days')
+
+
+def upgrade_records(records):
+    records = deepcopy(records)
+    if not isinstance(records, dict):
+        return records
+    for record in records.values():
+        if not isinstance(record, dict) or not isinstance(record.get('fields'), dict):
+            continue
+        fields = record['fields']
+        defaults = {'projects': {'priority': '普通', 'mode': '目标型'},
+                    'tasks': {'range_start': None, 'range_end': None, 'excluded_days': []}}.get(record.get('kind'), {})
+        for key, value in defaults.items():
+            fields.setdefault(key, value)
+    return records
 
 
 class SyncError(Exception):
@@ -52,6 +70,7 @@ def _timestamp(value):
 
 def validate(records):
     """Reject malformed data before any local or remote mutation."""
+    records = upgrade_records(records)
     try:
         if not isinstance(records, dict):
             raise ValueError()
@@ -69,9 +88,9 @@ def validate(records):
             if not isinstance(fields, dict) or set(fields) != set(FIELDS[kind]):
                 raise ValueError()
             for key, value in fields.items():
-                if key in ("days", "completions", "position", "amount_cents"):
+                if key in ("days", "completions", "position", "amount_cents", "excluded_days"):
                     continue
-                if key in ("project_id", "milestone_id", "planned_on", "completed_at", "settled_on") and value is None:
+                if key in ("project_id", "milestone_id", "planned_on", "completed_at", "settled_on", "range_start", "range_end") and value is None:
                     continue
                 if not isinstance(value, str) or len(value) > 10000:
                     raise ValueError()
@@ -84,7 +103,7 @@ def validate(records):
             if fields.get("completed_at") is not None:
                 _timestamp(fields["completed_at"])
             if kind == "projects":
-                if fields["status"] not in PROJECT_STATUSES:
+                if fields["status"] not in PROJECT_STATUSES or fields['priority'] not in TASK_PRIORITIES or fields['mode'] not in PROJECT_MODES:
                     raise ValueError()
                 name = fields["name"].casefold()
                 if name in names:
@@ -117,6 +136,17 @@ def validate(records):
                     if fields["settled_on"] < fields["occurred_on"]:
                         raise ValueError()
             if kind == "tasks":
+                if (fields['range_start'] is None) != (fields['range_end'] is None):
+                    raise ValueError()
+                if fields['range_start'] is not None:
+                    _day(fields['range_start'])
+                    _day(fields['range_end'])
+                    if fields['range_end'] < fields['range_start']:
+                        raise ValueError()
+                if not isinstance(fields['excluded_days'], list) or fields['excluded_days'] != sorted(set(fields['excluded_days'])):
+                    raise ValueError()
+                for day in fields['excluded_days']:
+                    _day(day)
                 for key, choices in (("status", TASK_STATUSES), ("resume_status", TASK_STATUSES[:-1]),
                                      ("kind", TASK_KINDS), ("category", TASK_CATEGORIES), ("priority", TASK_PRIORITIES)):
                     if fields[key] not in choices:
@@ -161,8 +191,9 @@ def _reference(records, uid, kind, optional):
 
 
 def encode(records):
+    records = upgrade_records(records)
     validate(records)
-    version = 2 if any(r["kind"] == "finance_entries" for r in records.values()) else 1
+    version = 3 if any(r['kind'] in ('projects', 'tasks') for r in records.values()) else (2 if any(r["kind"] == "finance_entries" for r in records.values()) else 1)
     content = json.dumps({"format": "agent-system-data", "version": version, "records": records},
                          ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if len(content.encode("utf-8")) > MAX_BYTES:
@@ -182,12 +213,20 @@ def decode(content):
                 result[key] = value
             return result
         payload = json.loads(content, object_pairs_hook=unique_keys)
-        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2):
+        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2, 3):
             raise ValueError()
         validate(payload["records"])
+        if payload['version'] == 3:
+            for record in payload['records'].values():
+                if record['fields'] is not None and set(record['fields']) != set(FIELDS[record['kind']]):
+                    raise ValueError()
         if payload["version"] == 1 and any(r["kind"] == "finance_entries" for r in payload["records"].values()):
             raise ValueError()
-        return payload["records"]
+        if payload['version'] < 3:
+            for record in payload['records'].values():
+                if record['fields'] is not None and set(record['fields']) != set(LEGACY_FIELDS[record['kind']]):
+                    raise ValueError()
+        return upgrade_records(payload["records"])
     except (ValueError, TypeError, KeyError, AttributeError) as error:
         raise SyncError("远端同步文件损坏或版本不受支持，未覆盖本地数据。") from error
 
@@ -210,6 +249,7 @@ class Conflict:
 
 def merge(base, local, remote, choices=None):
     """A whole task includes its calendar membership and completion history."""
+    base, local, remote = (upgrade_records(records) for records in (base, local, remote))
     validate(base)
     validate(local)
     validate(remote)

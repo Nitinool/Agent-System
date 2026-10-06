@@ -26,6 +26,9 @@ class Task:
     acceptance: str = ""
     outcome: str = ""
     completed_at: str | None = None
+    range_start: date | None = None
+    range_end: date | None = None
+    project_code: str = ""
 
     @property
     def completed(self) -> bool:
@@ -45,6 +48,8 @@ class TaskDraft:
     milestone_id: int | None = None
     acceptance: str = ""
     outcome: str = ""
+    range_start: str = ""
+    range_end: str = ""
 
 
 @dataclass(frozen=True)

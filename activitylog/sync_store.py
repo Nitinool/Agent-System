@@ -5,7 +5,7 @@ from contextlib import closing
 import json
 import sqlite3
 
-from .sync import FIELDS, LocalChanged, REPOSITORY, SyncError, encode, validate
+from .sync import FIELDS, LocalChanged, REPOSITORY, SyncError, encode, validate, upgrade_records
 
 TABLES = tuple(FIELDS)
 
@@ -22,9 +22,17 @@ class SyncRepository:
             self.db.execute("""CREATE TABLE IF NOT EXISTS sync_state (
                 repository TEXT PRIMARY KEY, baseline TEXT NOT NULL, synced_at TEXT NOT NULL)""")
             for table in TABLES:
+                identity = "t.project_key" if table == 'projects' else "lower(hex(randomblob(16)))"
                 self.db.execute(f"""INSERT INTO sync_entities(uid, kind, local_id)
-                    SELECT lower(hex(randomblob(16))), ?, t.id FROM {table} t
+                    SELECT {identity}, ?, t.id FROM {table} t
                     WHERE NOT EXISTS (SELECT 1 FROM sync_entities e WHERE e.kind=? AND e.local_id=t.id)""", (table, table))
+                if table == 'projects':
+                    self.db.execute('DROP TRIGGER IF EXISTS sync_insert_projects')
+                    self.db.execute("""CREATE TRIGGER sync_insert_projects AFTER INSERT ON projects BEGIN
+                        INSERT INTO sync_entities(uid,kind,local_id) VALUES(CASE WHEN EXISTS(SELECT 1 FROM sync_entities WHERE uid=NEW.project_key)
+                            THEN lower(hex(randomblob(16))) ELSE COALESCE(NEW.project_key,lower(hex(randomblob(16)))) END,'projects',NEW.id);
+                        UPDATE projects SET project_key=(SELECT uid FROM sync_entities WHERE kind='projects' AND local_id=NEW.id) WHERE id=NEW.id; END""")
+                    self.db.execute("UPDATE projects SET project_key=(SELECT uid FROM sync_entities WHERE kind='projects' AND local_id=projects.id)")
                 self.db.execute(f"""CREATE TRIGGER IF NOT EXISTS sync_insert_{table}
                     AFTER INSERT ON {table} BEGIN
                     INSERT INTO sync_entities(uid, kind, local_id)
@@ -58,11 +66,12 @@ class SyncRepository:
             row = self.db.execute(f"SELECT * FROM {table} WHERE id=?", (identifier,)).fetchone()
             if row is None:
                 raise SyncError("本地同步编号不一致，请关闭软件后重试。")
-            fields = {key: row[key] for key in FIELDS[table] if key not in ("days", "completions", "company")}
+            fields = {key: row[key] for key in FIELDS[table] if key not in ("days", "completions", "company", "excluded_days")}
             for key, kind in (("project_id", "projects"), ("milestone_id", "milestones")):
                 if key in fields:
                     fields[key] = reference(kind, fields[key])
             if table == "tasks":
+                fields['excluded_days'] = [r[0] for r in self.db.execute('SELECT day FROM task_day_exclusions WHERE task_id=? ORDER BY day', (identifier,))]
                 fields["days"] = [r[0] for r in self.db.execute("SELECT day FROM task_day_entries WHERE task_id=? ORDER BY day", (identifier,))]
                 fields["completions"] = []
                 for event in self.db.execute("SELECT title, project_id, completed_at, reopened_at FROM task_completions WHERE task_id=? ORDER BY id", (identifier,)):
@@ -76,7 +85,7 @@ class SyncRepository:
 
     def baseline(self):
         row = self.db.execute("SELECT baseline FROM sync_state WHERE repository=?", (REPOSITORY,)).fetchone()
-        return json.loads(row[0]) if row else {}
+        return upgrade_records(json.loads(row[0])) if row else {}
 
     def status(self, snapshot=None):
         base, local = self.baseline(), self.snapshot() if snapshot is None else snapshot
@@ -86,6 +95,7 @@ class SyncRepository:
 
     def apply(self, expected, merged):
         """Called only after the remote CAS succeeds; failed imports retain old base."""
+        merged = upgrade_records(merged)
         validate(merged)
         encode(merged)
         if self.snapshot() != expected:
@@ -133,12 +143,13 @@ class SyncRepository:
                     continue
                 # Parents already exist at this point; global IDs never enter
                 # business tables, preserving their existing repository APIs.
-                values = {key: value for key, value in fields.items() if key not in ("days", "completions", "company")}
+                values = {key: value for key, value in fields.items() if key not in ("days", "completions", "company", "excluded_days")}
                 for key in ("project_id", "milestone_id"):
                     if key in values:
                         values[key] = ids[values[key]] if values[key] else None
                 if table == "projects":
                     values["name_key"] = fields["name"].casefold()
+                    values['project_key'] = uid
                 if table == "job_applications":
                     key = fields["company"].casefold()
                     company = self.db.execute("SELECT id FROM job_companies WHERE name_key=?", (key,)).fetchone()
@@ -153,12 +164,16 @@ class SyncRepository:
                     identifier = self.db.execute(f"INSERT INTO {table}({columns}) VALUES ({placeholders})", tuple(values.values())).lastrowid
                     self.db.execute("DELETE FROM sync_entities WHERE uid=? AND local_id IS NULL", (uid,))
                     self.db.execute("UPDATE sync_entities SET uid=? WHERE kind=? AND local_id=?", (uid, table, identifier))
+                    if table == 'projects':
+                        self.db.execute('UPDATE projects SET project_key=? WHERE id=?', (uid, identifier))
                     ids[uid] = identifier
                 else:
                     identifier = ids[uid]
                     assignments = ", ".join(f"{key}=?" for key in values)
                     self.db.execute(f"UPDATE {table} SET {assignments} WHERE id=?", (*values.values(), identifier))
                 if table == "tasks" and uid in changed:
+                    self.db.execute('DELETE FROM task_day_exclusions WHERE task_id=?', (identifier,))
+                    self.db.executemany('INSERT INTO task_day_exclusions(task_id,day) VALUES(?,?)', ((identifier, day) for day in fields['excluded_days']))
                     self.db.execute("DELETE FROM task_day_entries WHERE task_id=?", (identifier,))
                     self.db.executemany("INSERT INTO task_day_entries(task_id, day) VALUES (?, ?)", ((identifier, day) for day in fields["days"]))
                     self.db.execute("DELETE FROM task_completions WHERE task_id=?", (identifier,))

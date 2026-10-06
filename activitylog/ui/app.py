@@ -84,6 +84,8 @@ class LoggerApp:
         return frame
 
     def select_page(self, page):
+        if getattr(self, 'current_page', None) == 'projects' and not self.projects_panel.flush_edits():
+            return
         self.pages[page].tkraise()
         self.current_page = page
         for name, button in self.nav_buttons.items():
@@ -372,6 +374,8 @@ class LoggerApp:
                                 f"{detail}\n\n{row.title}", parent=self.root)
 
     def close(self):
+        if not self.projects_panel.flush_edits():
+            return
         self.sync_controller.close()
         self._stop_scheduling()
         self.jobs_panel.cancel_refresh()

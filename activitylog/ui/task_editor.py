@@ -18,6 +18,9 @@ class TaskDialog(tk.Toplevel):
         self.resizable(False, False)
         self.service, self.on_saved = service, on_saved
         self.identifier = task.id if task else None
+        self.range_start = task.range_start.isoformat() if task and task.range_start else ""
+        self.range_end = task.range_end.isoformat() if task and task.range_end else ""
+        self.range_end_var = tk.StringVar(value=self.range_end)
         planned = task.planned_on if task else selected
         self.title_var = tk.StringVar(value=task.title if task else "")
         self.date_var = tk.StringVar(value=planned.isoformat() if planned else "")
@@ -38,6 +41,10 @@ class TaskDialog(tk.Toplevel):
             entry.grid(row=index, column=1, sticky="ew", pady=5)
             if index == 0:
                 self.title_entry = entry
+        range_box = ttk.Frame(body)
+        range_box.grid(row=1, column=2, sticky='w', padx=(10, 0))
+        ttk.Label(range_box, text='范围结束（留空表示单日）').pack(anchor='w')
+        ttk.Entry(range_box, textvariable=self.range_end_var, width=13).pack(anchor='w')
         ttk.Label(body, text="所属项目").grid(row=2, column=0, sticky="w", pady=5)
         self.project_combo = ttk.Combobox(body, values=("不属于项目",) + tuple(project.name for project in self.projects),
                                           state="readonly", width=40)
@@ -103,9 +110,13 @@ class TaskDialog(tk.Toplevel):
         draft = TaskDraft(self.title_var.get(), self.date_var.get(), self.category_var.get(),
                           self.notes.get("1.0", "end-1c"), self.priority_var.get(), self.kind_var.get(),
                           self.status_var.get(), project_id, milestone_id,
-                          self.acceptance.get("1.0", "end-1c"), self.outcome.get("1.0", "end-1c"))
+                          self.acceptance.get("1.0", "end-1c"), self.outcome.get("1.0", "end-1c"),
+                          self.date_var.get() if self.range_end_var.get() else '', self.range_end_var.get())
         try:
-            identifier = self.service.save(draft, self.identifier, in_today=self.today_var.get())
+            included = self.today_var.get()
+            if (draft.range_start, draft.range_end) != (self.range_start, self.range_end) and draft.range_start and draft.range_end:
+                included = included or draft.range_start <= self.service.today().isoformat() <= draft.range_end
+            identifier = self.service.save(draft, self.identifier, in_today=included)
         except (ValueError, sqlite3.Error) as error:
             self.error.set(str(error))
             return
