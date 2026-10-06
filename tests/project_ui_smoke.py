@@ -44,9 +44,10 @@ def main():
             assert panel.project_table.parent(f'project-{project}') == 'group-Active'
             # Check the mapped window: geometry alone misses a frame covering the tree.
             root.deiconify()
+            root.attributes('-topmost', True)
             try:
                 for size in ('1440x880', '1100x700'):
-                    root.geometry(size)
+                    root.geometry(size + '+0+0')
                     for page in ('tasks', 'projects', 'finance', 'projects'):
                         app.select_page(page)
                         root.lift()
@@ -62,7 +63,14 @@ def main():
                             )
                             assert hit == table, f'Project navigation is covered by {hit}'
             finally:
+                root.attributes('-topmost', False)
                 root.withdraw()
+            panel.mode.set('探索型')
+            assert panel.save_project_fields()
+            assert '累计完成 0 次' in panel.progress.get()
+            assert panel.exploration_bar.itemcget(panel.exploration_fill, 'fill') == '#ffffff'
+            panel.mode.set('目标型')
+            assert panel.save_project_fields()
             panel.lane.set('Planning')
             panel.change_lane()
             assert panel.project_table.parent(f'project-{project}') == 'group-Planning'
@@ -77,6 +85,8 @@ def main():
             task = panel.selected_task_id
             row = panel.rows[task]
             assert row.task.milestone_id == stage
+            combos = [child for child in row.title_entry.master.winfo_children() if child.winfo_class() == 'TCombobox']
+            assert len(combos) == 1 and tuple(combos[0]['values']) == ('紧急', '高', '普通', '低')
             row.title_var.set('直接编辑名称')
             assert row.save_fields()
             row.toggle_notes()
@@ -91,6 +101,9 @@ def main():
             assert service.tasks.get(task).range_end == date(2026, 10, 12)
             dialog = panel.rows[task].more_settings()
             assert dialog.range_end_var.get() == '2026-10-12'
+            assert not dialog.acceptance.winfo_manager()
+            labels = [child['text'] for child in dialog.title_entry.master.winfo_children() if child.winfo_class() == 'TLabel']
+            assert '状态' not in labels and '验收条件' not in labels
             dialog.submit()
             assert service.tasks.get(task).range_end == date(2026, 10, 12)
             app.select_page('tasks')
@@ -100,14 +113,28 @@ def main():
             panel.rows[task].done.set(True)
             panel.rows[task].complete()
             assert not service.tasks.today_tasks()
-            assert str(panel.accept_buttons[stage]['state']) == 'normal'
+            assert not hasattr(panel, 'accept_buttons')
             panel.undo_completion()
             assert service.tasks.is_in_today(task)
             panel.mode.set('探索型')
             assert panel.save_project_fields()
-            assert not panel.progress_bar.winfo_manager() and '%' not in panel.progress.get()
+            assert not panel.progress_bar.winfo_manager() and panel.exploration_bar.winfo_manager() and '%' not in panel.progress.get()
+            assert '累计完成 1 次' in panel.progress.get()
+            first_color = panel.exploration_bar.itemcget(panel.exploration_fill, 'fill')
+            panel.rows[task].done.set(True)
+            panel.rows[task].complete()
+            assert '累计完成 2 次' in panel.progress.get()
+            second_color = panel.exploration_bar.itemcget(panel.exploration_fill, 'fill')
+            assert int(second_color[1:3], 16) < int(first_color[1:3], 16)
+            panel.rows[task].complete()
+            assert '累计完成 2 次' in panel.progress.get()
+            panel.undo_completion()
+            assert '累计完成 2 次' in panel.progress.get()
+            panel.refresh()
+            assert panel.exploration_bar.itemcget(panel.exploration_fill, 'fill') == second_color
             panel.mode.set('目标型')
             panel.save_project_fields()
+            assert panel.progress_bar.winfo_manager() and not panel.exploration_bar.winfo_manager()
             panel.select_task(task)
             panel.schedule_start.set('2026-11-01')
             panel.schedule_end.set('2026-11-10')
@@ -121,7 +148,13 @@ def main():
             root.geometry('1100x700')
             root.update_idletasks()
             assert panel.canvas.winfo_width() >= 550
-            assert panel.canvas.winfo_height() >= 150
+            assert panel.canvas.winfo_height() >= 400
+            assert panel.schedule.winfo_height() < 65
+            controls = panel.schedule.winfo_children()
+            assert len({child.winfo_y() for child in controls if child.winfo_class() == 'TButton'}) == 1
+            for child in controls:
+                assert child.winfo_width() >= child.winfo_reqwidth()
+                assert child.winfo_x() + child.winfo_width() <= panel.schedule.winfo_width()
             with patch('activitylog.ui.project_board.messagebox.askyesno', return_value=True):
                 panel.delete_stage(stage)
             assert service.tasks.get(task).milestone_id is None

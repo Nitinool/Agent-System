@@ -5,7 +5,7 @@ import sqlite3
 import tkinter as tk
 from tkinter import messagebox, ttk
 from ..projects import PROJECT_LANES, PROJECT_MODES, LANE_STATUS, ProjectDraft, MilestoneDraft
-from ..tasks import TASK_PRIORITIES, TASK_STATUSES, TaskDraft
+from ..tasks import TASK_PRIORITIES, TaskDraft
 from .priority import PriorityDots
 
 
@@ -53,7 +53,6 @@ class TaskRow(tk.Frame):
         self.title_var = tk.StringVar(value=task.title)
         self.done = tk.BooleanVar(value=task.completed)
         self.priority = tk.StringVar(value=task.priority)
-        self.status = tk.StringVar(value=task.status)
         bar = tk.Frame(self, background='white')
         bar.pack(fill='x')
         bar.columnconfigure(1, weight=1)
@@ -62,15 +61,14 @@ class TaskRow(tk.Frame):
         self.title_entry.grid(row=0, column=1, sticky='ew', padx=4)
         for event in ('<Return>', '<FocusOut>'):
             self.title_entry.bind(event, lambda _: self.save_fields())
-        for col, variable, choices in ((2, self.priority, TASK_PRIORITIES), (3, self.status, TASK_STATUSES)):
-            combo = ttk.Combobox(bar, textvariable=variable, values=choices, state='readonly', width=6)
-            combo.grid(row=0, column=col, padx=3)
-            combo.bind('<<ComboboxSelected>>', lambda _: self.save_fields())
+        combo = ttk.Combobox(bar, textvariable=self.priority, values=TASK_PRIORITIES, state='readonly', width=6)
+        combo.grid(row=0, column=2, padx=3)
+        combo.bind('<<ComboboxSelected>>', lambda _: self.save_fields())
         self.date_button = ttk.Button(bar, text=self.date_text(), width=11, command=lambda: board.select_task(task.id))
-        self.date_button.grid(row=0, column=4, padx=3)
+        self.date_button.grid(row=0, column=3, padx=3)
         self.note_button = ttk.Button(bar, text='笔记 ▸' + (' ●' if task.notes else ''), width=7, command=self.toggle_notes)
-        self.note_button.grid(row=0, column=5, padx=3)
-        ttk.Button(bar, text='×', width=2, command=lambda: board.delete_task(task.id)).grid(row=0, column=6)
+        self.note_button.grid(row=0, column=4, padx=3)
+        ttk.Button(bar, text='×', width=2, command=lambda: board.delete_task(task.id)).grid(row=0, column=5)
         self.note_frame = tk.Frame(self, background='#f5f7fb', padx=8, pady=6)
         self.notes = tk.Text(self.note_frame, width=1, height=3, wrap='word', relief='flat', background='#f5f7fb', font=('Microsoft YaHei UI', 9))
         self.notes.pack(fill='x')
@@ -93,10 +91,10 @@ class TaskRow(tk.Frame):
         return self.task.planned_on.isoformat() if self.task.planned_on else '安排日期'
 
     def dirty(self):
-        return self.title_var.get() != self.task.title or self.notes.get('1.0', 'end-1c') != self.task.notes
+        return self.title_var.get() != self.task.title or self.priority.get() != self.task.priority or self.notes.get('1.0', 'end-1c') != self.task.notes
 
     def save_fields(self):
-        changes = dict(title=self.title_var.get(), priority=self.priority.get(), status=self.status.get())
+        changes = dict(title=self.title_var.get(), priority=self.priority.get())
         if all(getattr(self.task, key) == value for key, value in changes.items()):
             return True
         if not self.board.run(lambda: self.board.service.tasks.update(self.task.id, **changes)):
@@ -111,7 +109,6 @@ class TaskRow(tk.Frame):
         previous = self.task.status
         if self.board.run(lambda: self.board.service.tasks.complete(self.task.id, self.done.get())):
             self.task = self.board.service.tasks.get(self.task.id)
-            self.status.set(self.task.status)
             if self.task.completed:
                 self.board.undo_state = (self.task.id, previous)
                 self.board.feedback.set('✓ 已完成，可撤销')
@@ -182,7 +179,7 @@ class TaskRow(tk.Frame):
         if self.board.flush_edits():
             return TaskDialog(self.winfo_toplevel(), self.board.service.tasks,
                 lambda identifier: self.board.task_saved(identifier), None,
-                task=self.board.service.tasks.get(self.task.id), in_today=self.board.service.tasks.is_in_today(self.task.id))
+                task=self.board.service.tasks.get(self.task.id), in_today=self.board.service.tasks.is_in_today(self.task.id), simple=True)
 
     def cleanup(self, event):
         if event.widget == self and self.timer is not None:
@@ -196,7 +193,6 @@ class ProjectOverview(ttk.Frame):
         self.service, self.project = service, None
         self.selected_project_id = self.selected_task_id = None
         self.rows, self.stages, self.stage_open = {}, {}, {}
-        self.accept_buttons = {}
         self.milestones = ()
         self.undo_state = self.filter_timer = None
         for key, value in (('error', ''), ('feedback', ''), ('project_keyword', ''), ('name', ''), ('goal', ''), ('lane', 'Active'), ('mode', '目标型'), ('priority', '普通'), ('progress', ''), ('quick_title', ''), ('schedule_start', ''), ('schedule_end', ''), ('schedule_label', '请选择事项的日期按钮')):
@@ -241,7 +237,10 @@ class ProjectOverview(ttk.Frame):
         self.body.bind('<Configure>', lambda _: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
         self.canvas.bind('<Configure>', lambda event: self.canvas.itemconfigure(self.window, width=event.width))
         self.canvas.bind('<MouseWheel>', self.scroll)
-        ttk.Label(self, textvariable=self.error, foreground='#b42318', wraplength=850).grid(row=1, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        feedback = ttk.Frame(self)
+        feedback.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(4, 0))
+        ttk.Label(feedback, textvariable=self.error, foreground='#b42318', wraplength=850).pack(side='left')
+        ttk.Label(feedback, textvariable=self.feedback, foreground='#276943').pack(side='left', padx=8)
         self.project_keyword.trace_add('write', lambda *_: self.schedule_refresh())
         self.refresh()
 
@@ -270,6 +269,9 @@ class ProjectOverview(ttk.Frame):
             goal.bind(event, lambda _: self.save_project_fields())
         self.progress_bar = ttk.Progressbar(self.right, maximum=100)
         self.progress_bar.pack(fill='x', pady=(0, 8))
+        self.exploration_bar = tk.Canvas(self.right, height=14, background='white', highlightthickness=1, highlightbackground='#d0d5dd')
+        self.exploration_fill = self.exploration_bar.create_rectangle(0, 0, 0, 14, fill='white', outline='')
+        self.exploration_bar.bind('<Configure>', lambda event: self.exploration_bar.coords(self.exploration_fill, 0, 0, event.width, event.height))
         self.tools = ttk.Frame(self.right)
         self.tools.pack(fill='x', pady=(0, 8))
         ttk.Button(self.tools, text='＋阶段', command=self.add_stage).pack(side='left')
@@ -282,25 +284,17 @@ class ProjectOverview(ttk.Frame):
         self.add_item_button.pack(side='left', padx=(6, 0))
 
     def build_schedule(self):
-        schedule = ttk.LabelFrame(self.right, text='事项安排 · 范围内每天进入今日待办', padding=8)
+        self.schedule = schedule = ttk.LabelFrame(self.right, text='事项安排 · 点击事项的日期按钮', padding=5)
         schedule.pack(side='bottom', fill='x', pady=(8, 0))
-        schedule_label = ttk.Label(schedule, textvariable=self.schedule_label, foreground='#667085', wraplength=600)
-        schedule_label.pack(anchor='w')
-        schedule.bind('<Configure>', lambda event: schedule_label.configure(wraplength=max(280, event.width - 20)))
-        presets = ttk.Frame(schedule)
-        presets.pack(fill='x', pady=5)
         for text in ('今天', '一周', '一个月'):
-            ttk.Button(presets, text=text, width=7, command=lambda kind=text: self.preset(kind)).pack(side='left', padx=(0, 5))
-        ttk.Button(presets, text='清除安排', command=self.clear_schedule, width=9).pack(side='right')
-        custom = ttk.Frame(schedule)
-        custom.pack(fill='x')
-        ttk.Entry(custom, textvariable=self.schedule_start, width=12).pack(side='left')
-        ttk.Label(custom, text=' 至 ').pack(side='left')
-        ttk.Entry(custom, textvariable=self.schedule_end, width=12).pack(side='left')
-        ttk.Button(custom, text='应用日期 / 范围', command=self.apply_schedule).pack(side='left', padx=6)
-        self.undo_button = ttk.Button(custom, text='撤销完成', command=self.undo_completion, state='disabled')
+            ttk.Button(schedule, text=text, width=5, command=lambda kind=text: self.preset(kind)).pack(side='left', padx=(0, 3))
+        ttk.Entry(schedule, textvariable=self.schedule_start, width=10).pack(side='left')
+        ttk.Label(schedule, text=' 至 ').pack(side='left')
+        ttk.Entry(schedule, textvariable=self.schedule_end, width=10).pack(side='left')
+        ttk.Button(schedule, text='应用', width=4, command=self.apply_schedule).pack(side='left', padx=3)
+        ttk.Button(schedule, text='清除', width=4, command=self.clear_schedule).pack(side='left')
+        self.undo_button = ttk.Button(schedule, text='撤销完成', width=8, command=self.undo_completion, state='disabled')
         self.undo_button.pack(side='right')
-        ttk.Label(schedule, textvariable=self.feedback, foreground='#276943').pack(anchor='w', pady=(5, 0))
 
     def run(self, action):
         try:
@@ -312,7 +306,7 @@ class ProjectOverview(ttk.Frame):
             return False
 
     def has_drafts(self):
-        return bool(self.project and (self.name.get() != self.project.name or self.goal.get() != self.project.goal)) or any(row.dirty() for row in self.rows.values()) or (self.schedule_start.get(), self.schedule_end.get()) != self.schedule_original or any(name.get() != stage.name or goal.get() != stage.acceptance for stage, name, goal, _body, _count in self.stages.values())
+        return bool(self.project and (self.name.get() != self.project.name or self.goal.get() != self.project.goal)) or any(row.dirty() for row in self.rows.values()) or (self.schedule_start.get(), self.schedule_end.get()) != self.schedule_original or any(name.get() != stage.name for stage, name, _body, _count in self.stages.values())
 
     def inline_editing(self):
         widget = self.focus_get()
@@ -393,7 +387,6 @@ class ProjectOverview(ttk.Frame):
         for child in self.body.winfo_children():
             child.destroy()
         self.rows, self.stages, self.milestones = {}, {}, milestones
-        self.accept_buttons = {}
         self.unassigned_count = None
         self.stage_combo.configure(values=['未分阶段'] + [f'阶段 {i+1} · {stage.name}' for i, stage in enumerate(milestones)])
         self.stage_combo.current(0)
@@ -423,21 +416,13 @@ class ProjectOverview(ttk.Frame):
         if stage is None:
             self.unassigned_count = count
         if stage:
-            name, goal = tk.StringVar(value=stage.name), tk.StringVar(value=stage.acceptance)
+            name = tk.StringVar(value=stage.name)
             entry = ttk.Entry(heading, textvariable=name, width=1)
             entry.pack(side='left', fill='x', expand=True, padx=6)
             for event in ('<Return>', '<FocusOut>'):
                 entry.bind(event, lambda _, key=identifier: self.save_stage(key))
             ttk.Button(heading, text='×', width=2, command=lambda: self.delete_stage(identifier)).pack(side='right', padx=4)
-            target = ttk.Entry(body, textvariable=goal)
-            target.pack(fill='x', pady=(5, 6))
-            for event in ('<Return>', '<FocusOut>'):
-                target.bind(event, lambda _, key=identifier: self.save_stage(key))
-            ttk.Button(heading, text='＋目标', width=6, command=lambda: (body.pack(fill='x'), target.focus_set())).pack(side='right')
-            self.stages[identifier] = (stage, name, goal, body, count)
-            accept = ttk.Button(body, text='确认验收', state='disabled', command=lambda: self.accept_stage(identifier))
-            accept.pack(anchor='e')
-            self.accept_buttons[identifier] = accept
+            self.stages[identifier] = (stage, name, body, count)
         for task in tasks:
             row = TaskRow(body, self, task)
             row.pack(fill='x')
@@ -456,14 +441,13 @@ class ProjectOverview(ttk.Frame):
         button.configure(text=button['text'].replace('▸', '▾') if expanded else button['text'].replace('▾', '▸'))
 
     def save_stage(self, identifier):
-        stage, name, goal, body, count = self.stages[identifier]
-        if name.get() == stage.name and goal.get() == stage.acceptance:
+        stage, name, body, count = self.stages[identifier]
+        if name.get() == stage.name:
             return True
-        if self.run(lambda: self.service.save_milestone(stage.project_id, MilestoneDraft(name.get(), goal.get()), identifier)):
+        if self.run(lambda: self.service.save_milestone(stage.project_id, MilestoneDraft(name.get(), stage.acceptance), identifier)):
             latest = next(s for s in self.service.milestones(stage.project_id) if s.id == identifier)
             name.set(latest.name)
-            goal.set(latest.acceptance)
-            self.stages[identifier] = (latest, name, goal, body, count)
+            self.stages[identifier] = (latest, name, body, count)
             self.update_counts()
             return True
         return False
@@ -508,10 +492,6 @@ class ProjectOverview(ttk.Frame):
         if self.flush_edits() and messagebox.askyesno('删除阶段', '事项会保留在未分阶段中，确认删除阶段？', parent=self.winfo_toplevel()) and self.run(lambda: self.service.delete_milestone(identifier)):
             self.refresh()
 
-    def accept_stage(self, identifier):
-        if self.flush_edits() and messagebox.askyesno('确认验收', '确认阶段目标已经达成？', parent=self.winfo_toplevel()) and self.run(lambda: self.service.finish_milestone(identifier)):
-            self.refresh()
-
     def add_task(self):
         if not self.project or not self.flush_edits():
             return
@@ -543,6 +523,8 @@ class ProjectOverview(ttk.Frame):
         self.schedule_start.set(self.schedule_original[0])
         self.schedule_end.set(self.schedule_original[1])
         self.schedule_label.set(f'[{task.project_code}] {task.title}' if task else '点击事项的日期按钮；结束日期留空表示单日')
+        label = self.schedule_label.get()
+        self.schedule.configure(text='事项安排 · ' + (label[:28] + '…' if len(label) > 28 else label))
 
     def preset(self, kind):
         if self.selected_task_id is None:
@@ -584,23 +566,31 @@ class ProjectOverview(ttk.Frame):
     def update_counts(self):
         if not self.project:
             self.progress.set('暂无项目')
+            self.exploration_bar.pack_forget()
+            self.progress_bar.configure(value=0)
             return
         tasks = self.service.items(self.project.id)
         completed = sum(task.completed for task in tasks)
-        self.progress.set(f'{completed / len(tasks):.1%} · {completed}/{len(tasks)} 完成' if tasks and self.project.mode == '目标型' else f'已完成 {completed} 项 · 共 {len(tasks)} 项')
         if self.project.mode == '目标型':
+            self.progress.set(f'{completed / len(tasks):.1%} · {completed}/{len(tasks)} 完成' if tasks else '0% · 0/0 完成')
+            self.exploration_bar.pack_forget()
             self.progress_bar.pack(fill='x', pady=(0, 8), before=self.tools)
             self.progress_bar.configure(value=100 * completed / len(tasks) if tasks else 0)
         else:
             self.progress_bar.pack_forget()
+            count = len(self.service.completion_records(self.project.id))
+            self.progress.set(f'累计完成 {count} 次 · 当前完成 {completed}/{len(tasks)} 项')
+            # No target total: deepen the whole strip with accumulated real events.
+            strength = count / (count + 8)
+            color = '#' + ''.join(f'{round(255 + (channel - 255) * strength):02x}' for channel in (37, 99, 235))
+            self.exploration_bar.itemconfigure(self.exploration_fill, fill=color)
+            self.exploration_bar.pack(fill='x', pady=(0, 8), before=self.tools)
         if self.unassigned_count is not None:
             unassigned = [task for task in tasks if task.milestone_id is None]
             self.unassigned_count.configure(text=f'{sum(t.completed for t in unassigned)}/{len(unassigned)}')
-        for identifier, (_stage, _name, _goal, _body, label) in self.stages.items():
+        for identifier, (_stage, _name, _body, label) in self.stages.items():
             values = [task for task in tasks if task.milestone_id == identifier]
             label.configure(text=f'{sum(t.completed for t in values)}/{len(values)}')
-            stage = next(s for s in self.service.milestones(self.project.id) if s.id == identifier)
-            self.accept_buttons[identifier].configure(text='✓ 已验收' if stage.completed_at else '确认验收', state='normal' if stage.total and stage.completed == stage.total and not stage.completed_at else 'disabled')
         self.undo_button.configure(state='normal' if self.undo_state else 'disabled')
 
     def undo_completion(self):

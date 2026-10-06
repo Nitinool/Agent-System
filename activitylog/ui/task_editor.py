@@ -8,7 +8,7 @@ from ..tasks import TASK_CATEGORIES, TASK_KINDS, TASK_PRIORITIES, TASK_STATUSES,
 
 
 class TaskDialog(tk.Toplevel):
-    def __init__(self, parent, service, on_saved, selected, task=None, in_today=False, project_id=None, milestone_id=None):
+    def __init__(self, parent, service, on_saved, selected, task=None, in_today=False, project_id=None, milestone_id=None, simple=False):
         projects = service.projects()
         selected_project = task.project_id if task else project_id
         milestones = service.milestones(selected_project)
@@ -60,14 +60,17 @@ class TaskDialog(tk.Toplevel):
                                              (5, "优先级", self.priority_var, TASK_PRIORITIES),
                                              (6, "状态", self.status_var, TASK_STATUSES),
                                              (7, "分类", self.category_var, TASK_CATEGORIES)):
+            if simple and label in ('类型', '状态'):
+                continue
             ttk.Label(body, text=label).grid(row=row, column=0, sticky="w", pady=5)
             ttk.Combobox(body, textvariable=variable, values=values, state="readonly", width=16).grid(
                 row=row, column=1, sticky="w", pady=5)
         ttk.Checkbutton(body, text="加入今日待办", variable=self.today_var).grid(row=8, column=1, sticky="w", pady=5)
         for row, label, attribute in ((9, "验收条件", "acceptance"), (10, "成果说明", "outcome"), (11, "备注", "notes")):
-            ttk.Label(body, text=label).grid(row=row, column=0, sticky="nw", pady=4)
             text = tk.Text(body, width=42, height=2, wrap="word", font=("Microsoft YaHei UI", 10))
-            text.grid(row=row, column=1, sticky="ew", pady=4)
+            if not (simple and attribute == 'acceptance'):
+                ttk.Label(body, text=label).grid(row=row, column=0, sticky="nw", pady=4)
+                text.grid(row=row, column=1, sticky="ew", pady=4)
             setattr(self, attribute, text)
             if task:
                 text.insert("1.0", getattr(task, attribute))

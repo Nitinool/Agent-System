@@ -1,4 +1,4 @@
-"""Stage folds, editing recovery, real acceptance and guarded inline drafts."""
+"""Stage titles, folds, checkbox completion and guarded inline drafts."""
 from datetime import date
 from pathlib import Path
 import sqlite3
@@ -31,14 +31,16 @@ def main():
             panel = app.projects_panel
             assert len(panel.rows) == 10 and len(panel.stages) == 3
             stage = panel.milestones[0]
-            body = panel.stages[stage.id][3]
+            body = panel.stages[stage.id][2]
             fold = body.master.winfo_children()[0].winfo_children()[0]
             fold.invoke()
             assert not body.winfo_manager()
             fold.invoke()
             assert body.winfo_manager()
-            panel.stages[stage.id][2].set('新的阶段目标')
+            panel.stages[stage.id][1].set('新的阶段标题')
             assert panel.save_stage(stage.id)
+            assert service.projects.milestones(project)[0].acceptance == stage.acceptance
+            assert all(child.winfo_class() != 'TEntry' for child in body.winfo_children())
             identifier = next(t.id for t in service.projects.items(project) if t.milestone_id == stage.id)
             row = panel.rows[identifier]
             row.title_var.set('')
@@ -60,10 +62,9 @@ def main():
                 if task.milestone_id == stage.id:
                     panel.rows[task.id].done.set(True)
                     panel.rows[task.id].complete()
-            assert str(panel.accept_buttons[stage.id]['state']) == 'normal'
-            with patch('activitylog.ui.project_board.messagebox.askyesno', return_value=True):
-                panel.accept_stage(stage.id)
-            assert service.projects.milestones(project)[0].completed_at
+            assert not service.projects.milestones(project)[0].completed_at
+            assert not hasattr(panel, 'accept_stage')
+            assert panel.stages[stage.id][3]['text'] == '3/3'
             service.tasks.complete(identifier, False)
             panel.refresh()
             assert not service.projects.milestones(project)[0].completed_at
@@ -81,6 +82,6 @@ def main():
             app.close()
         with Store(Path(directory) / 'test.sqlite3') as reopened:
             assert reopened.db.execute('SELECT notes FROM tasks WHERE id=?', (added,)).fetchone()[0] == '关闭前的笔记'
-    print('Milestone UI smoke passed: folds, goals, drafts, save failure, navigation guard, full notes, acceptance invalidation and close flush.')
+    print('Milestone UI smoke passed: titles, folds, checkbox completion, drafts, save failure, navigation guard, full notes, legacy data preservation and close flush.')
 
 if __name__ == '__main__': main()
