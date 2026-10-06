@@ -86,7 +86,7 @@ class TaskRow(tk.Frame):
         self.bind('<Destroy>', self.cleanup)
 
     def date_text(self):
-        if self.task.range_start:
+        if self.task.range_start and self.task.range_start != self.task.range_end:
             return f'{self.task.range_start:%m/%d}—{self.task.range_end:%m/%d}'
         return self.task.planned_on.isoformat() if self.task.planned_on else '安排日期'
 
@@ -179,7 +179,7 @@ class TaskRow(tk.Frame):
         if self.board.flush_edits():
             return TaskDialog(self.winfo_toplevel(), self.board.service.tasks,
                 lambda identifier: self.board.task_saved(identifier), None,
-                task=self.board.service.tasks.get(self.task.id), in_today=self.board.service.tasks.is_in_today(self.task.id), simple=True)
+                task=self.board.service.tasks.get(self.task.id), in_today=self.board.service.tasks.is_in_today(self.task.id))
 
     def cleanup(self, event):
         if event.widget == self and self.timer is not None:

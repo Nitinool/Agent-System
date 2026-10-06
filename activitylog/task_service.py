@@ -37,7 +37,7 @@ class TaskService:
     def is_in_today(self, identifier: int) -> bool:
         return self.repository.is_on_day(identifier, self.today())
 
-    def save(self, draft: TaskDraft, identifier: int | None = None, *, in_today: bool = False) -> int:
+    def save(self, draft: TaskDraft, identifier: int | None = None, *, in_today: bool | None = False) -> int:
         title = draft.title.strip()
         if not title:
             raise ValueError("请填写事项名称。")

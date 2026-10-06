@@ -15,6 +15,9 @@ from activitylog.storage import Store
 from activitylog.task_service import TaskService
 from activitylog.task_store import TaskRepository
 from activitylog.tasks import TaskDraft
+from activitylog.projects import ProjectDraft, MilestoneDraft
+from activitylog.project_store import ProjectRepository
+from activitylog.project_service import ProjectService
 from activitylog.ui.app import LoggerApp
 from activitylog.ui.tasks import TaskDialog
 
@@ -27,7 +30,76 @@ class Reader:
         return Activity("fixture.exe", "测试事项界面", -1)
 
 
+def check_compact_editor():
+    with Store(':memory:') as store:
+        root = tk.Tk()
+        root.withdraw()
+        failures = []
+        root.report_callback_exception = lambda kind, error, trace: failures.append(error)
+        tasks = TaskService(TaskRepository(store.db), today=lambda: date(2026, 10, 6))
+        projects = ProjectService(ProjectRepository(store.db), tasks)
+        project = projects.save(ProjectDraft('原项目'))
+        other = projects.save(ProjectDraft('新项目'))
+        stage = projects.save_milestone(project, MilestoneDraft('原阶段', '旧条件'))
+        identifier = tasks.save(TaskDraft('旧事项', '2026-10-08', priority='紧急', kind='问题', status='受阻', project_id=project, milestone_id=stage, acceptance='保留验收', outcome='保留成果'), in_today=True)
+        tasks.complete(identifier, True)
+        original = tasks.get(identifier)
+        try:
+            dialog = TaskDialog(root, tasks, lambda _: None, None, task=original)
+            dialog.notes.insert('1.0', '新的备注')
+            dialog.submit()
+            saved = tasks.get(identifier)
+            for field in ('priority', 'kind', 'status', 'milestone_id', 'acceptance', 'outcome', 'completed_at', 'resume_status'):
+                assert getattr(saved, field) == getattr(original, field), field
+            assert len(projects.completion_records(project)) == 1 and tasks.is_in_today(identifier)
+            dialog = TaskDialog(root, tasks, lambda _: None, None, task=saved)
+            dialog.project_combo.current(next(i+1 for i, p in enumerate(dialog.projects) if p.id == other))
+            dialog.submit()
+            assert tasks.get(identifier).milestone_id is None
+            assert tasks.get(identifier).status == '已完成'
+
+            dialog = TaskDialog(root, tasks, lambda _: None, None)
+            dialog.title_var.set('日期验证')
+            dialog.range_end_var.set('2026-10-08')
+            dialog.submit()
+            assert '开始日期' in dialog.error.get() and store.db.execute('SELECT count(*) FROM tasks').fetchone()[0] == 1
+            dialog.date_var.set('2026-10-09')
+            dialog.submit()
+            assert dialog.error.get() and dialog.winfo_exists()
+            dialog.date_var.set('2028-02-01')
+            dialog.range_end_var.set('')
+            picker = dialog.end_field.open_picker()
+            assert (picker.year, picker.month) == (2028, 2)
+            picker.destroy()
+            assert root.grab_current() == dialog
+            picker = dialog.start_field.open_picker()
+            next(child for child in picker.days.winfo_children() if child.winfo_class() == 'TButton' and child['text'] == '29').invoke()
+            assert dialog.date_var.get() == '2028-02-29' and root.grab_current() == dialog
+            dialog.date_var.set('2026-10-06')
+            dialog.range_end_var.set('2026-10-08')
+            added = []
+            dialog.on_saved = added.append
+            dialog.submit()
+            ranged = tasks.get(added[0])
+            assert ranged.range_end == date(2026, 10, 8) and tasks.is_in_today(ranged.id)
+            tasks.remove_today(ranged.id)
+            dialog = TaskDialog(root, tasks, lambda _: None, None, task=tasks.get(ranged.id))
+            dialog.notes.insert('1.0', '跳过当天仍保留')
+            dialog.submit()
+            assert not tasks.is_in_today(ranged.id)
+            dialog = TaskDialog(root, tasks, lambda _: None, None)
+            dialog.title_var.set('待安排事项')
+            added = []
+            dialog.on_saved = added.append
+            dialog.submit()
+            assert tasks.get(added[0]).planned_on is None and not tasks.is_in_today(added[0])
+            assert not failures, failures
+        finally:
+            root.destroy()
+
+
 def main():
+    check_compact_editor()
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "ui.sqlite3"
         root = tk.Tk()
@@ -49,6 +121,21 @@ def main():
 
             dialog = panel.add_task()
             assert isinstance(dialog, TaskDialog)
+            labels = [child['text'] for child in dialog.title_entry.master.winfo_children() if child.winfo_class() == 'TLabel']
+            for removed in ('里程碑', '类型', '优先级', '状态', '加入今日待办', '验收条件', '成果说明'):
+                assert removed not in labels
+            picker = dialog.start_field.open_picker()
+            assert root.grab_current() == picker
+            picker.move(1)
+            assert (picker.year, picker.month) == (2026, 11)
+            picker.choose(date(2026, 10, 6))
+            assert dialog.date_var.get() == '2026-10-06' and root.grab_current() == dialog
+            picker = dialog.end_field.open_picker()
+            picker.choose(None)
+            assert dialog.range_end_var.get() == '' and root.grab_current() == dialog
+            root.update_idletasks()
+            assert dialog.start_field.winfo_y() == dialog.end_field.winfo_y()
+            assert dialog.winfo_reqheight() < 480
             dialog.title_var.set("修改简历")
             dialog.date_var.set("无效日期")
             dialog.submit()
@@ -59,6 +146,10 @@ def main():
             dialog.submit()
             first = panel._selected()
             assert first.title == "修改简历" and first.category == "求职"
+            assert first.range_start == first.range_end == date(2026, 10, 6)
+            dialog = panel.edit_task()
+            assert dialog.range_end_var.get() == ''
+            dialog.destroy()
             assert panel.selected_date == date(2026, 10, 6)
             assert len(panel.today_list.checks) == 0
             panel.arrange_button.invoke()
@@ -82,11 +173,11 @@ def main():
             panel.select_date(date(2026, 10, 6))
             panel.table.selection_set(f"task-{first.id}")
             panel._selection_changed()
+            service.tasks.arrange_today(first.id)
             dialog = panel.edit_task()
             assert dialog.notes.get("1.0", "end-1c") == "检查项目介绍\n导出 PDF"
             dialog.title_var.set("修改简历第二版")
             dialog.date_var.set("2026-12-02")
-            dialog.today_var.set(True)
             dialog.submit()
             assert panel.month_text.get() == "2026年 12月"
             assert panel._selected().title == "修改简历第二版"
@@ -101,6 +192,8 @@ def main():
             panel.quick_title.set("跑步 30 分钟")
             panel.quick_button.invoke()
             second = panel._selected()
+            from activitylog.ui.task_colors import task_color
+            assert task_color(first) != task_color(second)
             assert second.planned_on == today[0]
             assert second.id in panel.today_list.checks and panel.quick_title.get() == ""
             with patch("activitylog.ui.tasks.messagebox.askyesno", return_value=False):

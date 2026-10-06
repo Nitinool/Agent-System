@@ -128,7 +128,7 @@ class TaskRepository:
         return any(task.id == identifier for task in self.day_tasks(day))
 
     def save(self, draft: TaskDraft, identifier: int | None, today: date,
-             in_today: bool) -> int:
+             in_today: bool | None) -> int:
         # Editing fields and today's membership succeed or roll back together.
         with self.db:
             if draft.project_id is not None and self.db.execute(
@@ -162,7 +162,8 @@ class TaskRepository:
                     previous.range_start.isoformat() if previous.range_start else '',
                     previous.range_end.isoformat() if previous.range_end else ''):
                 self.db.execute('DELETE FROM task_day_exclusions WHERE task_id=?', (identifier,))
-            self._set_membership(identifier, today, in_today)
+            if in_today is not None:
+                self._set_membership(identifier, today, in_today)
             self._record_transition(self.get(identifier), previous.status if previous else None)
             self._invalidate_milestone(draft.milestone_id)
             if previous:

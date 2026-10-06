@@ -101,7 +101,7 @@ def main():
             assert service.tasks.get(task).range_end == date(2026, 10, 12)
             dialog = panel.rows[task].more_settings()
             assert dialog.range_end_var.get() == '2026-10-12'
-            assert not dialog.acceptance.winfo_manager()
+            assert not hasattr(dialog, 'acceptance') and not hasattr(dialog, 'milestone_combo')
             labels = [child['text'] for child in dialog.title_entry.master.winfo_children() if child.winfo_class() == 'TLabel']
             assert '状态' not in labels and '验收条件' not in labels
             dialog.submit()

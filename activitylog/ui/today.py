@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk
-from .priority import priority_color
+from .task_colors import task_color
 
 
 class TodayList(ttk.Frame):
@@ -44,7 +44,7 @@ class TodayList(ttk.Frame):
             row.pack(fill="x", pady=(0, 1))
             row.columnconfigure(1, weight=1)
             dot = tk.Canvas(row, width=12, height=18, background=background, highlightthickness=0)
-            dot.create_oval(2, 6, 10, 14, fill=priority_color(task.priority, task.completed), outline="")
+            dot.create_oval(2, 6, 10, 14, fill=task_color(task), outline="")
             dot.grid(row=0, column=0, sticky="n", pady=(3, 0))
             variable = tk.BooleanVar(value=task.completed)
             title = f"[{task.project_code}] {task.title}" if task.project_code else task.title
@@ -55,7 +55,7 @@ class TodayList(ttk.Frame):
                                   foreground="#667085" if task.completed else "#253246",
                                   command=lambda identifier=task.id, value=variable: self.on_complete(identifier, value.get()))
             check.grid(row=0, column=1, columnspan=3, sticky="ew")
-            detail = f"{task.priority} · {task.status}"
+            detail = task.category
             tk.Label(row, text=detail, background=background, foreground="#667085",
                      font=("Microsoft YaHei UI", 9), anchor="w").grid(row=1, column=1, sticky="w", padx=(23, 0))
             for column, label, callback in ((2, "编辑", self.on_edit), (3, "移出", self.on_remove)):

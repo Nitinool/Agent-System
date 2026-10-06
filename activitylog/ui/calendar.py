@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import font
 
 from ..tasks import month_days
-from .priority import priority_color
+from .task_colors import task_color
 
 
 class MonthCalendar(tk.Canvas):
@@ -65,7 +65,7 @@ class MonthCalendar(tk.Canvas):
             shown = min(len(tasks), 2, capacity)
             for position, task in enumerate(tasks[:shown]):
                 top = y + 25 + position * line_height
-                color = priority_color(task.priority, task.completed)
+                color = task_color(task)
                 self.create_oval(x + 5, top + 5, x + 12, top + 12, fill=color, outline="")
                 self.create_text(x + 17, top, anchor="nw",
                                  text=self._fit(task.title, cell_width - 22),

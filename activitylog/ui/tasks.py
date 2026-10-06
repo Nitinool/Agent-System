@@ -9,7 +9,7 @@ from ..task_service import TaskService
 from .calendar import MonthCalendar
 from .today import TodayList
 from .task_editor import TaskDialog
-from .priority import PriorityDots
+from .task_colors import TaskDots
 
 
 class TaskOverview(ttk.Frame):
@@ -20,7 +20,7 @@ class TaskOverview(ttk.Frame):
         self.year, self.month = self.selected_date.year, self.selected_date.month
         self.snapshot = None
         self.show_unscheduled = False
-        self.dots = PriorityDots(self)
+        self.dots = TaskDots(self)
         self.displayed_tasks = {}
         self.day_timer = None
         self.layout_timer = None
@@ -77,11 +77,11 @@ class TaskOverview(ttk.Frame):
         container.grid(row=4, column=0, sticky="nsew")
         container.rowconfigure(0, weight=1)
         container.columnconfigure(0, weight=1)
-        self.table = ttk.Treeview(container, columns=("done", "title", "priority", "status", "today"),
+        self.table = ttk.Treeview(container, columns=("done", "title", "category", "today"),
                                   show=("tree", "headings"), selectmode="browse", height=6, style="Priority.Treeview")
         self.table.column("#0", width=24, minwidth=24, stretch=False)
         for key, label, width in (("done", "完成", 48), ("title", "事项", 300),
-                                  ("priority", "优先级", 65), ("status", "状态", 70), ("today", "今日安排", 90)):
+                                  ("category", "分类", 65), ("today", "今日安排", 90)):
             self.table.heading(key, text=label, anchor="w")
             self.table.column(key, width=width, minwidth=width if key != "title" else 100,
                               stretch=key == "title", anchor="w")
@@ -154,7 +154,7 @@ class TaskOverview(ttk.Frame):
             self.displayed_tasks[item] = task
             self.table.insert("", "end", iid=item, image=self.dots.for_task(task),
                               values=("☑" if task.completed else "☐", task.title,
-                              task.priority, task.status, "已在今天" if task.id in today_ids else ""),
+                              task.category, "已在今天" if task.id in today_ids else ""),
                               tags=("completed",) if task.completed else ())
             if task.id == selected_id:
                 self.table.selection_set(item)

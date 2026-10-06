@@ -31,6 +31,24 @@ class ProjectBoardTests(unittest.TestCase):
         self.project = self.projects.save(ProjectDraft('测试', priority='高', mode='探索型'))
         self.task = self.tasks.save(TaskDraft('事项', '', project_id=self.project))
 
+    def test_save_without_membership_choice_follows_dates_and_preserves_manual_days(self):
+        single = self.tasks.save(TaskDraft('未来单日', '2026-10-07', range_start='2026-10-07', range_end='2026-10-07'), in_today=None)
+        self.assertFalse(self.tasks.is_in_today(single))
+        self.today = date(2026, 10, 7)
+        self.assertTrue(self.tasks.is_in_today(single))
+        self.tasks.complete(single, True)
+        self.assertFalse(self.tasks.is_in_today(single))
+        self.tasks.complete(single, False)
+        self.tasks.remove_today(single)
+        self.tasks.save(TaskDraft('修改名称', '2026-10-07', range_start='2026-10-07', range_end='2026-10-07'), single, in_today=None)
+        self.assertFalse(self.tasks.is_in_today(single))
+        self.tasks.arrange_today(single)
+        self.tasks.save(TaskDraft('改到未来', '2026-10-09', range_start='2026-10-09', range_end='2026-10-09'), single, in_today=None)
+        self.assertFalse(self.tasks.is_in_today(single))
+        manual = self.tasks.add_today('手动待办')
+        self.tasks.save(TaskDraft('编辑手动待办', '2026-10-09'), manual, in_today=None)
+        self.assertTrue(self.tasks.is_in_today(manual))
+
     def test_range_is_inclusive_and_completion_exits_then_reopen_returns(self):
         self.tasks.schedule(self.task, '2026-10-06', '2026-10-08')
         self.assertTrue(self.tasks.is_in_today(self.task))
