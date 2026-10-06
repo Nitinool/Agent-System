@@ -42,6 +42,27 @@ def main():
             project = panel.project.id
             code = panel.project.code
             assert panel.project_table.parent(f'project-{project}') == 'group-Active'
+            # Check the mapped window: geometry alone misses a frame covering the tree.
+            root.deiconify()
+            try:
+                for size in ('1440x880', '1100x700'):
+                    root.geometry(size)
+                    for page in ('tasks', 'projects', 'finance', 'projects'):
+                        app.select_page(page)
+                        root.lift()
+                        root.update()
+                        if page != 'projects':
+                            continue
+                        table = panel.project_table
+                        for item in ('group-Active', f'project-{project}'):
+                            x, y, width, height = table.bbox(item)
+                            hit = root.winfo_containing(
+                                table.winfo_rootx() + x + width // 2,
+                                table.winfo_rooty() + y + height // 2,
+                            )
+                            assert hit == table, f'Project navigation is covered by {hit}'
+            finally:
+                root.withdraw()
             panel.lane.set('Planning')
             panel.change_lane()
             assert panel.project_table.parent(f'project-{project}') == 'group-Planning'
