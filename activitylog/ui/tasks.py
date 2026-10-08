@@ -1,4 +1,4 @@
-"""Month calendar and today's checklist backed by the same task service."""
+"""Full-width month calendar and dated task editing; Today lives on Home."""
 
 from datetime import date
 import sqlite3
@@ -7,7 +7,6 @@ from tkinter import messagebox, ttk
 
 from ..task_service import TaskService
 from .calendar import MonthCalendar
-from .today import TodayList
 from .task_editor import TaskDialog
 from .task_colors import TaskDots
 
@@ -23,34 +22,19 @@ class TaskOverview(ttk.Frame):
         self.dots = TaskDots(self)
         self.displayed_tasks = {}
         self.day_timer = None
-        self.layout_timer = None
+        self.on_refresh = None
         self.total_text = tk.StringVar()
         self.month_text = tk.StringVar()
         self.unscheduled_text = tk.StringVar()
         self.selected_text = tk.StringVar()
-        self.today_text = tk.StringVar()
-        self.today_count = tk.StringVar()
-        self.quick_title = tk.StringVar()
         self.error = tk.StringVar()
         ttk.Label(self, text="事项管理", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w", pady=(0, 14))
-        self.panes = ttk.Panedwindow(self, orient="horizontal")
-        self.panes.pack(fill="both", expand=True)
-        left = ttk.Frame(self.panes)
-        right = ttk.Frame(self.panes, padding=(16, 0, 0, 0))
-        self.panes.add(left, weight=65)
-        self.panes.add(right, weight=35)
+        left = ttk.Frame(self)
+        left.pack(fill='both', expand=True)
         self._build_calendar(left)
-        self._build_today(right)
         ttk.Label(self, textvariable=self.error, foreground="#b42318").pack(fill="x", pady=(4, 0))
         self.refresh()
-        self.layout_timer = self.after_idle(self._place_sash)
         self.day_timer = self.after(30000, self._check_day)
-
-    def _place_sash(self):
-        self.layout_timer = None
-        width = self.panes.winfo_width()
-        if width > 1:
-            self.panes.sashpos(0, round(width * .65))
 
     def _build_calendar(self, parent):
         parent.columnconfigure(0, weight=1)
@@ -106,22 +90,6 @@ class TaskOverview(ttk.Frame):
         self.arrange_button = ttk.Button(actions, text="安排今天", command=self.arrange_today, state="disabled")
         self.arrange_button.pack(side="right")
 
-    def _build_today(self, parent):
-        heading = ttk.Frame(parent)
-        heading.pack(fill="x", pady=(0, 12))
-        ttk.Label(heading, text="今日待办", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
-        ttk.Label(heading, textvariable=self.today_text, foreground="#667085").pack(side="left", padx=10)
-        quick = ttk.Frame(parent)
-        quick.pack(fill="x", pady=(0, 12))
-        entry = ttk.Entry(quick, textvariable=self.quick_title)
-        entry.pack(side="left", fill="x", expand=True)
-        entry.bind("<Return>", lambda _: self.add_today())
-        self.quick_button = ttk.Button(quick, text="＋", width=3, command=self.add_today)
-        self.quick_button.pack(side="left", padx=(6, 0))
-        self.today_list = TodayList(parent, self.complete_task, self.edit_task, self.remove_today)
-        self.today_list.pack(fill="both", expand=True)
-        ttk.Label(parent, textvariable=self.today_count, foreground="#667085").pack(anchor="w", pady=(10, 0))
-
     def refresh(self, identifier=None):
         try:
             snapshot = self.service.snapshot(self.year, self.month, self.selected_date)
@@ -131,6 +99,8 @@ class TaskOverview(ttk.Frame):
         self.snapshot = snapshot
         self.error.set("")
         self._display(identifier)
+        if self.on_refresh:
+            self.on_refresh()
 
     def _display(self, identifier=None):
         snapshot = self.snapshot
@@ -140,7 +110,6 @@ class TaskOverview(ttk.Frame):
         self.unscheduled_text.set(f"待安排 {len(snapshot.unscheduled_tasks)}")
         label = "待安排" if self.show_unscheduled else f"{self.selected_date:%m月%d日}"
         self.selected_text.set(f"{label} · {len(rows)} 项")
-        self.today_text.set(f"{snapshot.today:%m/%d} · 周{'一二三四五六日'[snapshot.today.weekday()]}")
         self.calendar.display(self.year, self.month, self.selected_date, snapshot.today, snapshot.calendar_tasks)
         today_ids = {task.id for task in snapshot.today_tasks}
         selected = self.table.selection()
@@ -160,9 +129,6 @@ class TaskOverview(ttk.Frame):
                 self.table.selection_set(item)
         self.table.yview_moveto(position)
         self._selection_changed()
-        self.today_list.display(snapshot.today_tasks, snapshot.today)
-        completed = sum(task.completed for task in snapshot.today_tasks)
-        self.today_count.set(f"已完成 {completed} / {len(today_ids)} · 剩余 {len(today_ids) - completed} 项")
 
     def _selected(self):
         selected = self.table.selection()
@@ -243,25 +209,11 @@ class TaskOverview(ttk.Frame):
         self.refresh(identifier)
         return True
 
-    def add_today(self):
-        title = self.quick_title.get()
-        identifier = None
-        try:
-            identifier = self.service.add_today(title)
-        except (ValueError, sqlite3.Error) as error:
-            self.error.set(str(error))
-            return
-        self.quick_title.set("")
-        self._saved(identifier)
-
     def arrange_today(self):
         task = self._selected()
         if task:
             if self._run(lambda: self.service.arrange_today(task.id), task.id) and task.planned_on is None:
                 self._saved(task.id)
-
-    def remove_today(self, identifier):
-        self._run(lambda: self.service.remove_today(identifier), identifier)
 
     def complete_task(self, identifier, completed):
         self._run(lambda: self.service.complete(identifier, completed), identifier)
@@ -303,8 +255,6 @@ class TaskOverview(ttk.Frame):
         self.day_timer = self.after(30000, self._check_day)
 
     def cancel_refresh(self):
-        for name in ("day_timer", "layout_timer"):
-            timer = getattr(self, name)
-            if timer is not None:
-                self.after_cancel(timer)
-                setattr(self, name, None)
+        if self.day_timer is not None:
+            self.after_cancel(self.day_timer)
+            self.day_timer = None

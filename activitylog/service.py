@@ -19,6 +19,7 @@ from .project_store import ProjectRepository
 from .sync_store import SyncRepository
 from .finance_store import FinanceRepository
 from .finance_service import FinanceService
+from .dashboard_service import DashboardService
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class ActivityService:
         self.projects = ProjectService(ProjectRepository(store.db), self.tasks)
         self.finance = FinanceService(FinanceRepository(store.db))
         self.sync = SyncRepository(store)
+        self.dashboard = DashboardService(self)
 
     def capture(self, exclusions: str = "") -> CaptureResult:
         excluded = {name.strip().lower() for name in exclusions.replace("，", ",").split(",") if name.strip()}

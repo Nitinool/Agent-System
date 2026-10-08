@@ -106,8 +106,9 @@ def main():
             assert '状态' not in labels and '验收条件' not in labels
             dialog.submit()
             assert service.tasks.get(task).range_end == date(2026, 10, 12)
+            app.select_page('home')
+            assert app.home_panel.today_list.checks[task][1]['text'].startswith('[' + code + ']')
             app.select_page('tasks')
-            assert app.tasks_panel.today_list.checks[task][1]['text'].startswith('[' + code + ']')
             assert task in {t.id for t in app.tasks_panel.calendar.by_day[date(2026, 10, 7)]}
             app.select_page('projects')
             panel.rows[task].done.set(True)

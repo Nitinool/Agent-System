@@ -12,6 +12,7 @@ from .tasks import TaskOverview
 from .projects import ProjectOverview
 from .sync import SyncController
 from .finance import FinanceOverview
+from .home import HomeOverview
 
 
 class LoggerApp:
@@ -43,10 +44,15 @@ class LoggerApp:
         self.finance_panel = FinanceOverview(self.page_container, service.finance)
         self.pages["finance"] = self.finance_panel
         self.finance_panel.grid(row=0, column=0, sticky="nsew")
+        self.home_panel = HomeOverview(self.page_container, service, self.tasks_panel.refresh,
+                                       self.select_page, self._open_home_project, self.toggle)
+        self.pages['home'] = self.home_panel
+        self.home_panel.grid(row=0, column=0, sticky='nsew')
+        self.tasks_panel.on_refresh = self.home_panel.refresh
         tk.Label(self.sidebar, textvariable=self.status, background="#f3f5f9", foreground="#667085",
                  wraplength=120, justify="left", padx=14, pady=12).pack(side="bottom", fill="x")
         self.sync_controller = SyncController(self)
-        self.select_page("records")
+        self.select_page("home")
         self.refresh()
         for variable in (self.filter_keyword, self.filter_app, self.filter_category):
             variable.trace_add("write", lambda *_: self.schedule_filter())
@@ -67,7 +73,7 @@ class LoggerApp:
         tk.Label(self.sidebar, text="我的记录", background="#f3f5f9", foreground="#253246",
                  font=("Microsoft YaHei UI", 13, "bold"), padx=14, pady=16, anchor="w").pack(fill="x")
         self.nav_buttons = {}
-        for page, label in (("records", "记录信息"), ("jobs", "求职一览"), ("tasks", "事项管理"), ("projects", "项目管理"), ("finance", "财务管理")):
+        for page, label in (("home", "主页"), ("records", "记录信息"), ("jobs", "求职一览"), ("tasks", "事项管理"), ("projects", "项目管理"), ("finance", "财务管理")):
             button = tk.Button(self.sidebar, text=label, command=lambda name=page: self.select_page(name),
                                font=("Microsoft YaHei UI", 10), anchor="w", relief="flat", borderwidth=0,
                                background="#f3f5f9", foreground="#344054", activebackground="#e8eef9",
@@ -91,7 +97,9 @@ class LoggerApp:
         for name, button in self.nav_buttons.items():
             button.configure(background="#e8eef9" if name == page else "#f3f5f9",
                              foreground="#2457a7" if name == page else "#344054")
-        if page == "jobs":
+        if page == 'home':
+            self.home_panel.refresh()
+        elif page == "jobs":
             self.jobs_panel.refresh()
         elif page == "tasks":
             self.tasks_panel.refresh()
@@ -99,6 +107,10 @@ class LoggerApp:
             self.projects_panel.refresh()
         elif page == "finance":
             self.finance_panel.refresh()
+
+    def _open_home_project(self, identifier):
+        self.select_page('projects')
+        self.projects_panel.refresh(identifier)
 
     def _build_controls(self, frame):
         ttk.Label(frame, text="我的行为时间线", font=("Microsoft YaHei UI", 19, "bold")).pack(anchor="w")
@@ -230,6 +242,7 @@ class LoggerApp:
                 self.table.selection_add(identifier)
         self.table.yview_moveto(position)
         self.charts.update_snapshot(snapshot)
+        self.home_panel.refresh_activity(snapshot)
 
     def schedule_filter(self):
         if self.filter_timer is not None:
@@ -297,6 +310,7 @@ class LoggerApp:
                 self.running = True
                 self.last_refresh = 0
                 self.toggle_button.configure(text="暂停记录")
+                self.home_panel.record_button.configure(text='暂停记录')
                 self.poll()
         except (OSError, sqlite3.Error) as error:
             self._capture_failed(error)
@@ -304,6 +318,7 @@ class LoggerApp:
     def _stop_scheduling(self):
         self.running = False
         self.toggle_button.configure(text="开始记录")
+        self.home_panel.record_button.configure(text='开始记录')
         self.status.set("已暂停")
         if self.timer is not None:
             self.root.after_cancel(self.timer)
@@ -382,6 +397,7 @@ class LoggerApp:
         self.tasks_panel.cancel_refresh()
         self.projects_panel.cancel_refresh()
         self.finance_panel.cancel_refresh()
+        self.home_panel.cancel_refresh()
         if self.filter_timer is not None:
             self.root.after_cancel(self.filter_timer)
             self.filter_timer = None

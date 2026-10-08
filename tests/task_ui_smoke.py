@@ -113,11 +113,13 @@ def main():
             timer = app.timer
             app.nav_buttons["tasks"].invoke()
             panel = app.tasks_panel
+            home = app.home_panel
+            assert not hasattr(panel, "today_list")
             assert app.current_page == "tasks" and app.running and app.timer == timer
             assert panel.month_text.get() == "2026年 10月"
             assert len(panel.calendar.days) == 35
             assert len(panel.table.get_children()) == 0
-            assert "剩余 0 项" in panel.today_count.get()
+            assert "剩余 0 项" in home.today_count.get()
 
             dialog = panel.add_task()
             assert isinstance(dialog, TaskDialog)
@@ -151,25 +153,25 @@ def main():
             assert dialog.range_end_var.get() == ''
             dialog.destroy()
             assert panel.selected_date == date(2026, 10, 6)
-            assert len(panel.today_list.checks) == 0
+            assert len(home.today_list.checks) == 0
             panel.arrange_button.invoke()
-            assert len(panel.today_list.checks) == 1
-            assert first.id in panel.today_list.checks
+            assert len(home.today_list.checks) == 1
+            assert first.id in home.today_list.checks
             assert str(panel.arrange_button["state"]) == "disabled"
-            variable, check = panel.today_list.checks[first.id]
+            variable, check = home.today_list.checks[first.id]
             check.invoke()
             assert panel._selected().completed
-            assert panel.today_list.checks[first.id][0].get()
+            assert home.today_list.checks[first.id][0].get()
             assert panel.table.item(f"task-{first.id}", "values")[0] == "☑"
-            assert "已完成 1 / 1" in panel.today_count.get()
+            assert "已完成 1 / 1" in home.today_count.get()
             panel.toggle_selected()
-            assert not panel.today_list.checks[first.id][0].get()
+            assert not home.today_list.checks[first.id][0].get()
 
             panel.move_month(1)
             assert panel.month_text.get() == "2026年 11月"
-            assert "10/04" in panel.today_text.get() and len(panel.today_list.checks) == 1
-            panel.remove_today(first.id)
-            assert len(panel.today_list.checks) == 0 and service.tasks.get(first.id).title == "修改简历"
+            assert "10/04" in home.today_text.get() and len(home.today_list.checks) == 1
+            home.remove_today(first.id)
+            assert len(home.today_list.checks) == 0 and service.tasks.get(first.id).title == "修改简历"
             panel.select_date(date(2026, 10, 6))
             panel.table.selection_set(f"task-{first.id}")
             panel._selection_changed()
@@ -181,42 +183,48 @@ def main():
             dialog.submit()
             assert panel.month_text.get() == "2026年 12月"
             assert panel._selected().title == "修改简历第二版"
-            assert len(panel.today_list.checks) == 1
+            assert len(home.today_list.checks) == 1
 
             # Failure restores the checkbox, leaves fields saved, and does not pause capture.
             with patch.object(service.tasks, "complete", side_effect=sqlite3.OperationalError("测试写入失败")):
-                panel.today_list.checks[first.id][1].invoke()
-            assert not panel.today_list.checks[first.id][0].get()
-            assert panel.error.get() == "测试写入失败" and app.running
+                home.today_list.checks[first.id][1].invoke()
+            assert not home.today_list.checks[first.id][0].get()
+            assert home.error.get() == "测试写入失败" and app.running
 
-            panel.quick_title.set("跑步 30 分钟")
-            panel.quick_button.invoke()
-            second = panel._selected()
+            home.quick_title.set("跑步 30 分钟")
+            home.quick_button.invoke()
+            second = next(t for t in home.snapshot.tasks if t.title == "跑步 30 分钟")
+            panel.select_date(today[0])
+            panel.table.selection_set(f"task-{second.id}")
+            panel._selection_changed()
             from activitylog.ui.task_colors import task_color
             assert task_color(first) != task_color(second)
             assert second.planned_on == today[0]
-            assert second.id in panel.today_list.checks and panel.quick_title.get() == ""
+            assert second.id in home.today_list.checks and home.quick_title.get() == ""
             with patch("activitylog.ui.tasks.messagebox.askyesno", return_value=False):
                 panel.delete_button.invoke()
             assert service.tasks.repository.count() == 2
             with patch("activitylog.ui.tasks.messagebox.askyesno", return_value=True):
                 panel.delete_button.invoke()
-            assert service.tasks.repository.count() == 1 and second.id not in panel.today_list.checks
+            assert service.tasks.repository.count() == 1 and second.id not in home.today_list.checks
 
             for index in range(40):
                 service.tasks.save(TaskDraft(f"批量测试事项 {index}", "2026-10-04"), in_today=True)
             panel.go_today()
             root.update_idletasks()
             assert len(panel.table.get_children()) == 40
-            assert len(panel.today_list.checks) == 41
+            assert len(home.today_list.checks) == 41
             assert len(panel.calendar.by_day[date(2026, 10, 4)]) == 40
-            assert len(panel.today_list.labels) == 41
+            assert len(home.today_list.labels) == 41
             assert any("项" in panel.calendar.itemcget(item, "text")
                        for item in panel.calendar.find_all() if panel.calendar.type(item) == "text")
             root.geometry("1100x700")
             root.update_idletasks()
-            assert panel.calendar.winfo_width() >= 400
-            assert panel.today_list.canvas.winfo_width() >= 200
+            assert panel.calendar.winfo_width() >= 800
+            app.select_page("home")
+            root.update_idletasks()
+            assert home.today_list.canvas.winfo_width() >= 300
+            app.select_page("tasks")
             # Calendar day clicks and arrow navigation also update the dated detail list.
             from types import SimpleNamespace
             day_index = panel.calendar.days.index(date(2026, 10, 6))
@@ -229,13 +237,13 @@ def main():
             root.geometry("1440x880")
             root.update_idletasks()
 
-            # Midnight updates the right list while the selected calendar date stays fixed.
+            # Midnight updates Home while the selected calendar date stays fixed.
             today[0] = date(2026, 10, 5)
             panel.after_cancel(panel.day_timer)
             panel.day_timer = None
             panel._check_day()
             assert panel.selected_date == date(2026, 10, 4)
-            assert "10/05" in panel.today_text.get() and len(panel.today_list.checks) == 0
+            assert "10/05" in home.today_text.get() and len(home.today_list.checks) == 0
             panel.move_month(2)
             assert panel.month == 12
             panel.move_month(1)

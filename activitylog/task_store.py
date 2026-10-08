@@ -124,6 +124,9 @@ class TaskRepository:
     def count(self) -> int:
         return self.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
 
+    def all_tasks(self) -> tuple[Task, ...]:
+        return tuple(self._task(row) for row in self.db.execute(f"SELECT * FROM tasks ORDER BY {TASK_ORDER}"))
+
     def is_on_day(self, identifier: int, day: date) -> bool:
         return any(task.id == identifier for task in self.day_tasks(day))
 

@@ -25,7 +25,7 @@ class TodayList(ttk.Frame):
     def _resize(self, event):
         self.canvas.itemconfigure(self.window, width=event.width)
         for label in self.labels:
-            label.configure(wraplength=max(150, event.width - 42))
+            label.configure(wraplength=max(150, event.width - 144))
 
     def _scroll(self, event):
         if self.body.winfo_height() > self.canvas.winfo_height():
@@ -40,7 +40,7 @@ class TodayList(ttk.Frame):
         self.labels.clear()
         for task in tasks:
             background = "#eaf4f0" if task.completed else "white"
-            row = tk.Frame(self.body, background=background, padx=6, pady=6)
+            row = tk.Frame(self.body, background=background, padx=6, pady=4)
             row.pack(fill="x", pady=(0, 1))
             row.columnconfigure(1, weight=1)
             dot = tk.Canvas(row, width=12, height=18, background=background, highlightthickness=0)
@@ -49,19 +49,19 @@ class TodayList(ttk.Frame):
             variable = tk.BooleanVar(value=task.completed)
             title = f"[{task.project_code}] {task.title}" if task.project_code else task.title
             check = tk.Checkbutton(row, text=title, variable=variable, anchor="w", justify="left",
-                                  wraplength=max(150, self.canvas.winfo_width() - 42),
+                                  wraplength=max(150, self.canvas.winfo_width() - 144),
                                   font=("Microsoft YaHei UI", 10, "overstrike" if task.completed else "normal"),
                                   background=background, activebackground=background,
                                   foreground="#667085" if task.completed else "#253246",
                                   command=lambda identifier=task.id, value=variable: self.on_complete(identifier, value.get()))
-            check.grid(row=0, column=1, columnspan=3, sticky="ew")
-            detail = task.category
-            tk.Label(row, text=detail, background=background, foreground="#667085",
-                     font=("Microsoft YaHei UI", 9), anchor="w").grid(row=1, column=1, sticky="w", padx=(23, 0))
+            check.grid(row=0, column=1, sticky="ew")
+            if task.category != '其他':
+                tk.Label(row, text=task.category, background=background, foreground="#667085",
+                         font=("Microsoft YaHei UI", 9), anchor="w").grid(row=1, column=1, sticky="w", padx=(23, 0))
             for column, label, callback in ((2, "编辑", self.on_edit), (3, "移出", self.on_remove)):
                 tk.Button(row, text=label, relief="flat", borderwidth=0, background=background,
                           foreground="#667085", font=("Microsoft YaHei UI", 9), cursor="hand2",
-                          command=lambda identifier=task.id, action=callback: action(identifier)).grid(row=1, column=column)
+                          command=lambda identifier=task.id, action=callback: action(identifier)).grid(row=0, column=column)
             self.checks[task.id] = (variable, check)
             self.labels.append(check)
             self._bind_wheel(row)

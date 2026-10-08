@@ -28,8 +28,11 @@ class TaskService:
     def milestones(self, project_id: int | None):
         return ProjectRepository(self.repository.db).milestones(project_id) if project_id is not None else ()
 
-    def today_tasks(self) -> tuple[Task, ...]:
-        return self.repository.day_tasks(self.today())
+    def today_tasks(self, *, day: date | None = None) -> tuple[Task, ...]:
+        return self.repository.day_tasks(day if day is not None else self.today())
+
+    def all_tasks(self) -> tuple[Task, ...]:
+        return self.repository.all_tasks()
 
     def get(self, identifier: int) -> Task:
         return self.repository.get(identifier)

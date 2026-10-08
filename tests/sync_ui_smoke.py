@@ -83,11 +83,15 @@ def main():
                 assert sum(len(b.projects_panel.project_table.get_children(group)) for group in b.projects_panel.project_table.get_children()) == 1
                 assert len(b.finance_panel.pending_table.get_children()) == 1
                 assert b.service.finance.snapshot("2026-10").totals.pending == 32109
+                assert len(b.home_panel.snapshot.projects) == 1
+                assert b.home_panel.snapshot.jobs.applications == 1
+                assert b.home_panel.income.get() == '¥0.00'
                 bt = b.service.tasks.repository.unscheduled()[0].id
                 b.service.tasks.complete(bt, True)
                 synchronize(b)
                 synchronize(a)
                 assert a.service.tasks.get(t).completed
+                assert a.home_panel.project_rows[p]['label']['text'].startswith('100%')
                 a.service.tasks.save(TaskDraft("本机标题", "", project_id=p), t)
                 b.service.tasks.save(TaskDraft("远端标题", "", project_id=b.service.tasks.get(bt).project_id), bt)
                 synchronize(b)
