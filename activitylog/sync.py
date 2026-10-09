@@ -27,6 +27,7 @@ EVENT_FIELDS = {"title", "project_id", "completed_at", "reopened_at"}
 LEGACY_FIELDS = dict(FIELDS)
 FIELDS['projects'] += ('priority', 'mode')
 FIELDS['tasks'] += ('range_start', 'range_end', 'excluded_days')
+FIELDS['notes'] = ('title', 'created_at')
 
 
 def upgrade_records(records):
@@ -102,6 +103,8 @@ def validate(records):
                     _day(fields[key])
             if fields.get("completed_at") is not None:
                 _timestamp(fields["completed_at"])
+            if kind == 'notes':
+                _timestamp(fields['created_at'])
             if kind == "projects":
                 if fields["status"] not in PROJECT_STATUSES or fields['priority'] not in TASK_PRIORITIES or fields['mode'] not in PROJECT_MODES:
                     raise ValueError()
@@ -193,7 +196,13 @@ def _reference(records, uid, kind, optional):
 def encode(records):
     records = upgrade_records(records)
     validate(records)
-    version = 3 if any(r['kind'] in ('projects', 'tasks') for r in records.values()) else (2 if any(r["kind"] == "finance_entries" for r in records.values()) else 1)
+    kinds = {record['kind'] for record in records.values()}
+    if 'notes' in kinds:
+        version = 4
+    elif kinds & {'projects', 'tasks'}:
+        version = 3
+    else:
+        version = 2 if 'finance_entries' in kinds else 1
     content = json.dumps({"format": "agent-system-data", "version": version, "records": records},
                          ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if len(content.encode("utf-8")) > MAX_BYTES:
@@ -213,10 +222,12 @@ def decode(content):
                 result[key] = value
             return result
         payload = json.loads(content, object_pairs_hook=unique_keys)
-        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2, 3):
+        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2, 3, 4):
+            raise ValueError()
+        if payload['version'] < 4 and any(r['kind'] == 'notes' for r in payload['records'].values()):
             raise ValueError()
         validate(payload["records"])
-        if payload['version'] == 3:
+        if payload['version'] >= 3:
             for record in payload['records'].values():
                 if record['fields'] is not None and set(record['fields']) != set(FIELDS[record['kind']]):
                     raise ValueError()

@@ -20,6 +20,8 @@ from .sync_store import SyncRepository
 from .finance_store import FinanceRepository
 from .finance_service import FinanceService
 from .dashboard_service import DashboardService
+from .notes import NoteService
+from .note_store import NoteRepository
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class ActivityService:
         self.tasks = TaskService(TaskRepository(store.db))
         self.projects = ProjectService(ProjectRepository(store.db), self.tasks)
         self.finance = FinanceService(FinanceRepository(store.db))
+        self.notes = NoteService(NoteRepository(store.db))
         self.sync = SyncRepository(store)
         self.dashboard = DashboardService(self)
 

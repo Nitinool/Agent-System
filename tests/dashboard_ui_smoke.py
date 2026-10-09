@@ -29,6 +29,7 @@ def main():
         service = ActivityService(Store(Path(directory) / 'home.sqlite3'), FixtureReader())
         day = [date(2026, 10, 8)]
         service.tasks.today = lambda: day[0]
+        service.notes.clock = lambda: datetime(2026, 10, 8, 10, 30, 45).astimezone()
         app = LoggerApp(root, service)
         home = app.home_panel
         try:
@@ -37,6 +38,32 @@ def main():
             assert not hasattr(app.tasks_panel, 'quick_title')
             assert not home.time_chart.pie.find_withtag('slice')
             assert home.time_chart.pie.find_withtag('empty')
+            assert not home.finance_visible
+            assert home.income.get() == home.expense.get() == '••••'
+            home.note_title.set('开发 XXX')
+            home.note_button.invoke()
+            assert home.note_title.get() == ''
+            notes = service.notes.latest()
+            assert notes[0].title == '开发 XXX'
+            assert home.note_table.item(str(notes[0].id), 'values')[1] == '开发 XXX'
+            with patch.object(service.notes, 'add', side_effect=sqlite3.OperationalError('随笔写入失败')):
+                home.note_title.set('保留草稿')
+                home.note_button.invoke()
+            assert home.note_title.get() == '保留草稿' and home.note_error.get() == '随笔写入失败'
+            home.note_title.set('')
+            home.note_button.invoke()
+            assert home.note_error.get() == '请输入随笔内容。'
+            assert len(service.notes.latest()) == 1
+            home.note_title.set('键盘保存')
+            root.deiconify()
+            root.update()
+            home.note_entry.focus_force()
+            home.note_entry.event_generate('<Return>')
+            root.update()
+            assert service.notes.latest()[0].title == '键盘保存'
+            detail = home.open_note()
+            assert detail.title() == '随笔记录'
+            detail.destroy()
             project = service.projects.save(ProjectDraft('主页验证项目', priority='高'))
             milestone = service.projects.save_milestone(project, MilestoneDraft('搭建首页'))
             task = service.tasks.save(TaskDraft('共享阶段事项', '2026-10-08', project_id=project,
@@ -50,7 +77,16 @@ def main():
                 service.store.finish(identifier, begin + timedelta(seconds=seconds), seconds)
             home.refresh()
             root.update_idletasks()
+            assert home.income.get() == home.expense.get() == '••••'
+            home.finance_eye.invoke()
             assert home.income.get() == '¥230.10' and home.expense.get() == '¥68.50'
+            home.finance_eye.invoke()
+            home.refresh()
+            assert home.income.get() == home.expense.get() == '••••'
+            app.select_page('records')
+            app.select_page('home')
+            assert not home.finance_visible and home.income.get() == '••••'
+            home.finance_eye.invoke()
             assert len(home.today_list.checks) == 1
             assert home.today_list.checks[task][1]['text'].startswith('[' + service.projects.get(project).code + ']')
             assert len(home.time_chart.pie.find_withtag('slice')) == 2
@@ -107,6 +143,8 @@ def main():
             for index in range(30):
                 service.tasks.add_today(f'多条待办 {index}')
             home.refresh()
+            home.finance_eye.invoke()
+            assert not home.finance_visible
             root.attributes('-topmost', True)
             root.deiconify()
             root.lift()
@@ -116,6 +154,8 @@ def main():
                 root.update()
                 root.update_idletasks()
                 assert home.records_panel.winfo_width() == home.content.winfo_width()
+                assert home.notes_panel.winfo_x() < home.todo_panel.winfo_x() < home.finance_panel.winfo_x()
+                assert home.notes_panel.winfo_height() == home.todo_panel.winfo_height()
                 assert home.records_panel.winfo_y() >= home.todo_panel.winfo_y() + home.todo_panel.winfo_height()
                 assert home.records_panel.winfo_y() >= home.projects_panel.winfo_y() + home.projects_panel.winfo_height()
                 assert home.records_panel.winfo_y() + home.records_panel.winfo_height() <= home.content.winfo_height()
@@ -135,7 +175,7 @@ def main():
                               round((root.winfo_rootx() + root.winfo_width()) * scale_x),
                               round((root.winfo_rooty() + root.winfo_height()) * scale_y))
                     desktop.crop(bounds).save(destination)
-                for widget in (home.quick_button, home.time_chart.table):
+                for widget in (home.note_button, home.finance_eye, home.quick_button, home.time_chart.table):
                     x = widget.winfo_rootx() + widget.winfo_width() // 2
                     y = widget.winfo_rooty() + widget.winfo_height() // 2
                     assert root.winfo_containing(x, y) == widget, (geometry, str(widget), x, y,
@@ -157,6 +197,8 @@ def main():
             assert home.snapshot.day == date(2026, 11, 1)
             assert home.finance_title.get() == '2026 年 11 月'
             assert not home.today_list.checks and home.time_chart.total == 0
+            assert home.income.get() == home.expense.get() == '••••'
+            home.finance_eye.invoke()
             assert home.income.get() == home.expense.get() == '¥0.00'
             assert not failures, failures
             app.select_page('records')

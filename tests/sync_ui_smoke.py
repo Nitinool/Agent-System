@@ -75,6 +75,8 @@ def main():
                 t = a.service.tasks.save(TaskDraft("测试事项", "", project_id=p))
                 a.service.jobs.save_application("界面公司", ApplicationDraft("测试岗位", "2026-10-05"))
                 a.service.finance.save(FinanceDraft("收入", "321.09", "2026-10-05", "卖出物品", "副业收入", "二手交易", "待结算"))
+                a.service.notes.add('开发随笔功能')
+                b.home_panel.note_title.set('未提交的随笔草稿')
                 a.toggle()
                 synchronize(a)
                 assert a.running
@@ -85,7 +87,13 @@ def main():
                 assert b.service.finance.snapshot("2026-10").totals.pending == 32109
                 assert len(b.home_panel.snapshot.projects) == 1
                 assert b.home_panel.snapshot.jobs.applications == 1
-                assert b.home_panel.income.get() == '¥0.00'
+                assert b.home_panel.income.get() == '••••'
+                assert b.home_panel.snapshot.finance.income == 0
+                assert b.service.notes.latest()[0].title == '开发随笔功能'
+                assert len(b.home_panel.note_table.get_children()) == 1
+                assert b.home_panel.note_title.get() == '未提交的随笔草稿'
+                note_record = next(r for r in b.service.sync.snapshot().values() if r['kind'] == 'notes')
+                assert '记录时间：' in version_text(note_record, b.service.sync.snapshot())
                 bt = b.service.tasks.repository.unscheduled()[0].id
                 b.service.tasks.complete(bt, True)
                 synchronize(b)
