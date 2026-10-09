@@ -91,7 +91,7 @@ class SyncController:
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text=REPOSITORY, font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w")
         ttk.Label(frame, textvariable=self.status).pack(anchor="w", pady=8)
-        ttk.Label(frame, text="同步：求职、事项、今日待办、项目、里程碑、完成记录和财务账目。\n行为日志保留在本机。", justify="left").pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="同步：随笔、求职、事项、今日待办、项目、里程碑、完成记录和财务账目。\n行为日志保留在本机。", justify="left").pack(anchor="w", pady=(0, 12))
         row = ttk.Frame(frame)
         row.pack(fill="x")
         ttk.Label(row, text="GitHub Token：").pack(side="left")
@@ -100,7 +100,7 @@ class SyncController:
         self.remember_check = ttk.Checkbutton(frame, text="在本机记住（Windows 加密）", variable=self.remember)
         self.remember_check.pack(anchor="w", pady=7)
         ttk.Label(frame, text="创建 Fine-grained Token，仅选择本数据仓库，Contents 设为 Read and write。\n已保存 Token 时，输入框留空即可。Token 不会写入代码或同步文件。", wraplength=615).pack(anchor="w")
-        self.startup_check = ttk.Checkbutton(frame, text="启动时检查远端更新", variable=self.check_on_start, command=self._save_settings)
+        self.startup_check = ttk.Checkbutton(frame, text="启动时检查远端更新（手动模式只提示，不导入）", variable=self.check_on_start, command=self._save_settings)
         self.startup_check.pack(anchor="w", pady=(8, 0))
         self.auto_check = ttk.Checkbutton(frame, text="自动同步（停止修改后同步；每 5 分钟检查远端）", variable=self.auto_sync, command=self._save_settings)
         self.auto_check.pack(anchor="w", pady=4)
@@ -268,7 +268,7 @@ class SyncController:
         if self.operation_check_only:
             changed = remote != self.base
             self.remote_state = "远端有更新 · 请同步" if changed else "远端已核对"
-            self.notice.set("远端有新内容，点击立即同步即可合并。" if changed else "远端与上次同步一致。")
+            self.notice.set("远端有新内容，尚未导入本机；点击立即同步即可合并。" if changed else "远端与上次同步一致。")
             self.failures = 0
             self.retry_at = 0
             self.next_remote_check = time.monotonic() + REMOTE_INTERVAL_SECONDS
