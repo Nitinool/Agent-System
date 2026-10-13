@@ -52,6 +52,10 @@ class Store:
             self.db.close()
             raise
 
+    def revision(self):
+        """Cheap invalidation token for own writes and other committed connections."""
+        return self.db.total_changes, self.db.execute('PRAGMA data_version').fetchone()[0]
+
     def _initialize_schema(self) -> None:
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         tables = self.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()

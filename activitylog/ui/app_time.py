@@ -48,6 +48,10 @@ class AppTimeChart(ttk.Frame):
         ttk.Label(self, textvariable=self.detail, foreground='#667085').pack(anchor='w', pady=(6, 0))
 
     def display(self, snapshot):
+        key = snapshot.day, snapshot.summary.app_totals
+        if getattr(self, 'display_key', None) == key:
+            return
+        self.display_key = (snapshot.day, dict(snapshot.summary.app_totals))
         self.totals = dict(sorted(((app, seconds) for app, seconds in snapshot.summary.app_totals.items() if seconds > 0),
                                   key=lambda pair: (-pair[1], pair[0].casefold())))
         self.total = sum(self.totals.values())

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from contextlib import closing
+from collections import defaultdict
 import json
 import sqlite3
 
@@ -57,13 +58,26 @@ class SyncRepository:
         def reference(kind, identifier):
             return None if identifier is None else by_id[(kind, identifier)]
 
+        # Bulk reads keep GUI-thread snapshot cost proportional to rows, not SQL queries.
+        rows = {table: {row['id']: row for row in self.db.execute(f'SELECT * FROM {table}')}
+                for table in TABLES}
+        companies = {row['id']: row['name'] for row in self.db.execute('SELECT id,name FROM job_companies')}
+        days, excluded_days, completions = defaultdict(list), defaultdict(list), defaultdict(list)
+        for row in self.db.execute('SELECT task_id,day FROM task_day_entries ORDER BY task_id,day'):
+            days[row['task_id']].append(row['day'])
+        for row in self.db.execute('SELECT task_id,day FROM task_day_exclusions ORDER BY task_id,day'):
+            excluded_days[row['task_id']].append(row['day'])
+        for row in self.db.execute('SELECT task_id,title,project_id,completed_at,reopened_at FROM task_completions ORDER BY task_id,id'):
+            entry = {key: row[key] for key in ('title', 'project_id', 'completed_at', 'reopened_at')}
+            entry['project_id'] = reference('projects', entry['project_id'])
+            completions[row['task_id']].append(entry)
         result = {}
         for entity in identities:
             uid, table, identifier = entity["uid"], entity["kind"], entity["local_id"]
             if identifier is None:
                 result[uid] = {"kind": table, "fields": None}
                 continue
-            row = self.db.execute(f"SELECT * FROM {table} WHERE id=?", (identifier,)).fetchone()
+            row = rows[table].get(identifier)
             if row is None:
                 raise SyncError("本地同步编号不一致，请关闭软件后重试。")
             fields = {key: row[key] for key in FIELDS[table] if key not in ("days", "completions", "company", "excluded_days")}
@@ -71,15 +85,11 @@ class SyncRepository:
                 if key in fields:
                     fields[key] = reference(kind, fields[key])
             if table == "tasks":
-                fields['excluded_days'] = [r[0] for r in self.db.execute('SELECT day FROM task_day_exclusions WHERE task_id=? ORDER BY day', (identifier,))]
-                fields["days"] = [r[0] for r in self.db.execute("SELECT day FROM task_day_entries WHERE task_id=? ORDER BY day", (identifier,))]
-                fields["completions"] = []
-                for event in self.db.execute("SELECT title, project_id, completed_at, reopened_at FROM task_completions WHERE task_id=? ORDER BY id", (identifier,)):
-                    entry = dict(event)
-                    entry["project_id"] = reference("projects", entry["project_id"])
-                    fields["completions"].append(entry)
+                fields['excluded_days'] = excluded_days[identifier]
+                fields['days'] = days[identifier]
+                fields['completions'] = completions[identifier]
             if table == "job_applications":
-                fields["company"] = self.db.execute("SELECT name FROM job_companies WHERE id=?", (row["company_id"],)).fetchone()[0]
+                fields["company"] = companies[row['company_id']]
             result[uid] = {"kind": table, "fields": fields}
         return result
 

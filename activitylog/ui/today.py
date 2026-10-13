@@ -21,9 +21,17 @@ class TodayList(ttk.Frame):
         self.canvas.bind("<MouseWheel>", self._scroll)
         self.checks = {}
         self.labels = []
+        self.rows = {}
+        self.empty = None
+        self.layout_timer = None
+        self.wrap_width = None
+        self.bind('<Destroy>', self._destroyed, add='+')
 
     def _resize(self, event):
         self.canvas.itemconfigure(self.window, width=event.width)
+        if self.wrap_width == event.width:
+            return
+        self.wrap_width = event.width
         for label in self.labels:
             label.configure(wraplength=max(150, event.width - 144))
 
@@ -33,12 +41,30 @@ class TodayList(ttk.Frame):
         return "break"
 
     def display(self, tasks, today):
-        position = self.canvas.yview()[0]
-        for child in self.body.winfo_children():
-            child.destroy()
-        self.checks.clear()
-        self.labels.clear()
+        tasks = tuple(tasks)
+        previous = tuple(value[0] for value in self.rows.values())
+        # Restore optimistic checkbox state even when a failed write leaves data unchanged.
         for task in tasks:
+            if task.id in self.checks:
+                self.checks[task.id][0].set(task.completed)
+        if tasks == previous and (tasks or self.empty is not None):
+            return
+        position = self.canvas.yview()[0]
+        wanted = {task.id for task in tasks}
+        for identifier in set(self.rows) - wanted:
+            self.rows.pop(identifier)[1].destroy()
+            self.checks.pop(identifier)
+        if self.empty is not None:
+            self.empty.destroy()
+            self.empty = None
+        ordered = {}
+        for task in tasks:
+            cached = self.rows.get(task.id)
+            if cached is not None and cached[0] == task:
+                ordered[task.id] = cached
+                continue
+            if cached is not None:
+                cached[1].destroy()
             background = "#eaf4f0" if task.completed else "white"
             row = tk.Frame(self.body, background=background, padx=6, pady=4)
             row.pack(fill="x", pady=(0, 1))
@@ -63,13 +89,31 @@ class TodayList(ttk.Frame):
                           foreground="#667085", font=("Microsoft YaHei UI", 9), cursor="hand2",
                           command=lambda identifier=task.id, action=callback: action(identifier)).grid(row=0, column=column)
             self.checks[task.id] = (variable, check)
-            self.labels.append(check)
+            ordered[task.id] = (task, row)
             self._bind_wheel(row)
+        self.rows = ordered
+        # Reorder without unmapping retained frames (and all their native children).
+        anchor = None
+        for task, row in reversed(tuple(self.rows.values())):
+            row.pack(fill='x', pady=(0, 1), **({'before': anchor} if anchor is not None else {}))
+            anchor = row
+        self.labels = [self.checks[task.id][1] for task in tasks]
         if not tasks:
-            ttk.Label(self.body, text="暂无今日待办", foreground="#667085", padding=(6, 14)).pack(anchor="w")
-        self.update_idletasks()
+            self.empty = ttk.Label(self.body, text="暂无今日待办", foreground="#667085", padding=(6, 14))
+            self.empty.pack(anchor="w")
+        if self.layout_timer is not None:
+            self.after_cancel(self.layout_timer)
+        self.layout_timer = self.after_idle(lambda: self._restore_scroll(position))
+
+    def _restore_scroll(self, position):
+        self.layout_timer = None
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         self.canvas.yview_moveto(position)
+
+    def _destroyed(self, event):
+        if event.widget is self and self.layout_timer is not None:
+            self.after_cancel(self.layout_timer)
+            self.layout_timer = None
 
     def _bind_wheel(self, widget):
         widget.bind("<MouseWheel>", self._scroll)

@@ -79,6 +79,8 @@ class HomeOverview(ttk.Frame):
         self.snapshot = None
         self.day_timer = None
         self.project_rows = {}
+        self.projects_displayed = None
+        self.project_layout_timer = None
         self.finance_visible = False
         for name in ('date_text', 'today_text', 'today_count', 'finance_title', 'income', 'expense',
                      'project_count', 'jobs_text', 'quick_title', 'error'):
@@ -150,6 +152,7 @@ class HomeOverview(ttk.Frame):
         self.note_table.bind('<Return>', self.open_note)
         ttk.Label(self.notes_panel, text='最近 200 条 · 双击查看全文', foreground='#667085').pack(anchor='w', pady=(6, 0))
         self.note_rows = {}
+        self.notes_displayed = None
 
     def refresh_notes(self):
         try:
@@ -157,6 +160,10 @@ class HomeOverview(ttk.Frame):
         except (ValueError, sqlite3.Error) as error:
             self.note_error.set(str(error))
             return
+        if notes == self.notes_displayed:
+            self.note_error.set('')
+            return
+        self.notes_displayed = notes
         selection = self.note_table.selection()
         position = self.note_table.yview()[0]
         self.note_table.delete(*self.note_table.get_children())
@@ -338,6 +345,9 @@ class HomeOverview(ttk.Frame):
         self.today_count.set(f'已完成 {completed} / {len(tasks)} · 剩余 {len(tasks) - completed} 项')
 
     def _display_projects(self):
+        if self.snapshot.projects == self.projects_displayed:
+            return
+        self.projects_displayed = self.snapshot.projects
         position = self.project_canvas.yview()[0]
         for child in self.project_body.winfo_children():
             child.destroy()
@@ -370,7 +380,12 @@ class HomeOverview(ttk.Frame):
             self._bind_scroll(row)
         if not self.snapshot.projects:
             ttk.Label(self.project_body, text='暂无进行中的项目', foreground='#667085', padding=6).pack(anchor='w')
-        self.project_body.update_idletasks()
+        if self.project_layout_timer is not None:
+            self.after_cancel(self.project_layout_timer)
+        self.project_layout_timer = self.after_idle(lambda: self._restore_projects_scroll(position))
+
+    def _restore_projects_scroll(self, position):
+        self.project_layout_timer = None
         self.project_canvas.configure(scrollregion=self.project_canvas.bbox('all'))
         self.project_canvas.yview_moveto(position)
 
@@ -440,6 +455,9 @@ class HomeOverview(ttk.Frame):
         self.day_timer = self.after(30000, self._check_day)
 
     def cancel_refresh(self):
+        if self.project_layout_timer is not None:
+            self.after_cancel(self.project_layout_timer)
+            self.project_layout_timer = None
         if self.day_timer is not None:
             self.after_cancel(self.day_timer)
             self.day_timer = None

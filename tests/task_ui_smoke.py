@@ -219,8 +219,10 @@ def main():
             assert any("项" in panel.calendar.itemcget(item, "text")
                        for item in panel.calendar.find_all() if panel.calendar.type(item) == "text")
             root.geometry("1100x700")
-            root.update_idletasks()
-            assert panel.calendar.winfo_width() >= 800
+            app.select_page('tasks')
+            root.deiconify()
+            root.update()
+            assert panel.calendar.winfo_width() >= 800, (root.state(), root.geometry(), panel.winfo_width(), panel.calendar.winfo_width(), panel.winfo_manager())
             app.select_page("home")
             root.update_idletasks()
             assert home.today_list.canvas.winfo_width() >= 300

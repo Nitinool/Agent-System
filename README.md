@@ -20,6 +20,8 @@ python activity_logger.py
 
 更新代码后，先关闭旧版日志窗口，再重新双击启动脚本。
 
+窗口构建期间保持隐藏，完成首次布局后再显示，避免先看到局部未绘制的画面。切换页面仅显示当前页面；无数据或日期变化时复用已加载内容，今日待办只重建发生变化的行。新增 / 编辑、同步、其他数据库连接写入和跨日仍会更新显示。
+
 两台电脑轮流开发的流程见 [开发交接.md](开发交接.md)：通过 [Agent-System](https://github.com/Nitinool/Agent-System) 仓库同步代码和交接文档，每台电脑分别安装 Python。本地日志和数据库不进入仓库。
 
 ## 两台电脑同步数据
@@ -208,6 +210,14 @@ python -m tests.finance_ui_smoke
 python -m tests.autocomplete_ui_smoke
 python -m tests.dashboard_ui_smoke
 ```
+
+卡顿回归检查包含在单元测试中的 `tests/test_rendering_ui.py`。手动性能探针使用临时数据库、1,500 个事项 / 150 条今日待办和固定读取器，不连接远端或采集桌面：
+
+```powershell
+python -m tests.ui_performance_probe
+```
+
+输出包含启动、页面切换、空闲同步状态检查和 cProfile 耗时；计入分析器开销与布局时间，具体数值取决于机器与数据，不作为自动测试阈值。
 
 可以手动记录一分钟后按 `Win+L` 锁屏，解锁后检查：前后应用是两个时间段，中间出现锁屏记录。实际睡眠恢复还需结合本机电源模式验证。
 

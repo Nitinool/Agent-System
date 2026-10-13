@@ -44,7 +44,7 @@ class LoggerApp:
         self.finance_panel = FinanceOverview(self.page_container, service.finance)
         self.pages["finance"] = self.finance_panel
         self.finance_panel.grid(row=0, column=0, sticky="nsew")
-        self.home_panel = HomeOverview(self.page_container, service, self.tasks_panel.refresh,
+        self.home_panel = HomeOverview(self.page_container, service, self._home_tasks_changed,
                                        self.select_page, self._open_home_project, self.toggle)
         self.pages['home'] = self.home_panel
         self.home_panel.grid(row=0, column=0, sticky='nsew')
@@ -52,6 +52,7 @@ class LoggerApp:
         tk.Label(self.sidebar, textvariable=self.status, background="#f3f5f9", foreground="#667085",
                  wraplength=120, justify="left", padx=14, pady=12).pack(side="bottom", fill="x")
         self.sync_controller = SyncController(self)
+        self.page_revisions = {page: self._page_revision() for page in self.pages}
         self.select_page("home")
         self.refresh()
         for variable in (self.filter_keyword, self.filter_app, self.filter_category):
@@ -92,11 +93,18 @@ class LoggerApp:
     def select_page(self, page):
         if getattr(self, 'current_page', None) == 'projects' and not self.projects_panel.flush_edits():
             return
-        self.pages[page].tkraise()
+        for name, panel in self.pages.items():
+            if name != page:
+                panel.grid_remove()
+        self.pages[page].grid()
         self.current_page = page
         for name, button in self.nav_buttons.items():
             button.configure(background="#e8eef9" if name == page else "#f3f5f9",
                              foreground="#2457a7" if name == page else "#344054")
+        revision = self._page_revision()
+        error = getattr(self.pages[page], 'error', None)
+        if page != 'records' and self.page_revisions.get(page) == revision and (error is None or not error.get()):
+            return
         if page == 'home':
             self.home_panel.refresh()
         elif page == "jobs":
@@ -107,6 +115,18 @@ class LoggerApp:
             self.projects_panel.refresh()
         elif page == "finance":
             self.finance_panel.refresh()
+        elif page == 'records':
+            self.refresh()
+        if error is None or not error.get():
+            self.page_revisions[page] = revision
+
+    def _page_revision(self):
+        return self.service.store.revision(), self.service.tasks.today()
+
+    def _home_tasks_changed(self):
+        # Hidden calendar/table data is refreshed by the revision check on return.
+        if self.current_page == 'tasks':
+            self.tasks_panel.refresh()
 
     def _open_home_project(self, identifier):
         self.select_page('projects')

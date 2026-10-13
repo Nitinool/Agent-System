@@ -53,6 +53,7 @@ class SyncController:
         self.failures = 0
         self.next_remote_check = time.monotonic() + REMOTE_INTERVAL_SECONDS
         self.observed = self.repo.snapshot()
+        self.observed_revision = app.service.store.revision()
         self.changed_at = time.monotonic()
         self.operation_automatic = False
         self.operation_check_only = False
@@ -61,13 +62,17 @@ class SyncController:
                                       wraplength=120, justify="left", anchor="w", font=("Microsoft YaHei UI", 9))
         self.sidebar_label.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
         ttk.Button(app.sidebar, text="数据同步…", command=self.open).pack(side="bottom", fill="x", padx=12, pady=(0, 8))
-        self.update_status()
-        self._watch_status()
+        self.update_status(self.observed)
+        self.status_timer = self.root.after(STATUS_INTERVAL_MS, self._watch_status)
         if self.settings.check_on_start or self.settings.auto_sync:
             self.startup_timer = self.root.after(500, self._startup)
 
     def update_status(self, snapshot=None):
         pending, at = self.repo.status(snapshot)
+        self.status_values = pending, at
+        return self._render_status(pending, at)
+
+    def _render_status(self, pending, at):
         if pending and self.remote_state == "已同步":
             self.remote_state = "本机有修改"
         label = f"待同步 {pending} 条"
@@ -153,12 +158,17 @@ class SyncController:
         if self.closed:
             return
         try:
-            snapshot = self.repo.snapshot()
+            revision = self.app.service.store.revision()
             now = time.monotonic()
-            if snapshot != self.observed:
-                self.observed = snapshot
-                self.changed_at = now
-            pending = self.update_status(snapshot)
+            if revision != self.observed_revision:
+                snapshot = self.repo.snapshot()
+                if snapshot != self.observed:
+                    self.observed = snapshot
+                    self.changed_at = now
+                pending = self.update_status(snapshot)
+                self.observed_revision = revision
+            else:
+                pending = self._render_status(*self.status_values)
             if (self.settings.auto_sync and not self.busy and not self.automatic_paused
                     and not self._editing()
                     and now >= self.retry_at and now - self.changed_at >= AUTO_IDLE_SECONDS

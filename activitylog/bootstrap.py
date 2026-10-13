@@ -17,6 +17,8 @@ def main():
     directory = Path(__file__).resolve().parent.parent / "data"
     directory.mkdir(exist_ok=True)
     root = tk.Tk()
+    # Avoid exposing a partly built window while SQLite and Tk widgets initialize.
+    root.withdraw()
     instance = None
     service = None
     try:
@@ -29,6 +31,14 @@ def main():
         reader = WindowsReader()
         service = ActivityService(Store(db_path, recover=True), reader)
         LoggerApp(root, service)
+        # Map transparently once so native Windows controls obtain their real sizes
+        # and finish their first layout before the user sees the window.
+        root.attributes('-alpha', 0.0)
+        root.deiconify()
+        # The initial native Map/Configure messages are window events, not idle
+        # work; process them once here while transparent, before mainloop starts.
+        root.update()
+        root.attributes('-alpha', 1.0)
         root.mainloop()
     except (OSError, sqlite3.Error) as error:
         if root.winfo_exists():
