@@ -173,7 +173,8 @@ class TaskSchemaTests(unittest.TestCase):
             original = self.version_two(path)
             with Store(path) as store:
                 for table, rows in original.items():
-                    self.assertEqual([tuple(row) for row in store.db.execute(f"SELECT * FROM {table}")], rows)
+                    expected = [row + ('', '', '') for row in rows] if table == 'job_applications' else rows
+                    self.assertEqual([tuple(row) for row in store.db.execute(f"SELECT * FROM {table}")], expected)
                 self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
                 self.assertEqual(TaskRepository(store.db).count(), 0)
 

@@ -7,7 +7,8 @@ from tkinter import messagebox, ttk
 import webbrowser
 
 from ..job_service import JobService
-from ..jobs import APPLICATION_STATUSES, ApplicationDraft, ApplicationRow, application_rows
+from ..jobs import (APPLICATION_STATUSES, ApplicationDraft, ApplicationRow, application_rows,
+                    STAGE_TIMES, STAGE_LABELS, stage_time, application_progress)
 from .autocomplete import HistoryCombobox
 
 
@@ -21,11 +22,16 @@ class ApplicationDialog(tk.Toplevel):
         self.on_saved = on_saved
         self.identifier = row.application.id if row else None
         application = row.application if row else None
+        self.previous = application
+        self.linking_status = False
         history = service.history()
         self.company_var = tk.StringVar(value=row.company.name if row else "")
         self.title_var = tk.StringVar(value=application.title if application else "")
         self.date_var = tk.StringVar(value=application.applied_on.isoformat() if application else date.today().isoformat())
         self.status_var = tk.StringVar(value=application.status if application else "已投递")
+        self.manual_status = self.status_var.get()
+        for key in STAGE_TIMES:
+            setattr(self, key + '_var', tk.StringVar(value=getattr(application, key) if application else ''))
         self.url_var = tk.StringVar(value=application.url if application else "")
         body = ttk.Frame(self, padding=18)
         body.pack(fill="both", expand=True)
@@ -39,22 +45,47 @@ class ApplicationDialog(tk.Toplevel):
         ttk.Label(body, text="进度").grid(row=4, column=0, sticky="w", pady=5)
         ttk.Combobox(body, textvariable=self.status_var, values=APPLICATION_STATUSES, state="readonly",
                      width=20).grid(row=4, column=1, sticky="w", pady=5)
-        ttk.Label(body, text="备注").grid(row=5, column=0, sticky="nw", pady=5)
+        for index, (key, label) in enumerate(zip(STAGE_TIMES, STAGE_LABELS), 5):
+            variable = getattr(self, key + '_var')
+            ttk.Label(body, text=label).grid(row=index, column=0, sticky='w', pady=5)
+            ttk.Entry(body, textvariable=variable, width=48).grid(row=index, column=1, sticky='ew', pady=5)
+            variable.trace_add('write', lambda *_: self._link_status())
+        self.status_var.trace_add('write', self._manual_status_changed)
+        ttk.Label(body, text='时间选填：YYYY-MM-DD 或 YYYY-MM-DD HH:MM；填写后自动更新进度。',
+                  foreground='#667085', wraplength=510).grid(row=8, column=0, columnspan=2, sticky='w', pady=4)
+        ttk.Label(body, text="备注").grid(row=9, column=0, sticky="nw", pady=5)
         self.notes = tk.Text(body, height=5, width=48, wrap="word", font=("Microsoft YaHei UI", 10),
                              relief="solid", borderwidth=1)
-        self.notes.grid(row=5, column=1, sticky="ew", pady=5)
+        self.notes.grid(row=9, column=1, sticky="ew", pady=5)
         if application:
             self.notes.insert("1.0", application.notes)
         self.error = tk.StringVar()
         ttk.Label(body, textvariable=self.error, foreground="#b42318", wraplength=510).grid(
-            row=6, column=0, columnspan=2, sticky="w", pady=(5, 0))
+            row=10, column=0, columnspan=2, sticky="w", pady=(5, 0))
         actions = ttk.Frame(body)
-        actions.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        actions.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ttk.Button(actions, text="保存", command=self.submit).pack(side="right")
         ttk.Button(actions, text="取消", command=self.destroy).pack(side="right", padx=10)
         self.bind("<Escape>", lambda _: self.destroy())
         self.grab_set()
         self.company_combo.focus_set()
+
+    def _manual_status_changed(self, *_):
+        if not self.linking_status:
+            self.manual_status = self.status_var.get()
+            self._link_status()
+
+    def _link_status(self):
+        try:
+            times = [stage_time(getattr(self, key + '_var').get()) for key in STAGE_TIMES]
+        except ValueError:
+            return  # Keep an incomplete date editable; report validation errors on Save.
+        linked = application_progress(self.manual_status, *times, previous=self.previous)
+        self.linking_status = True
+        try:
+            self.status_var.set(linked)
+        finally:
+            self.linking_status = False
 
     @staticmethod
     def _history_field(body, index, label, variable, values):
@@ -65,7 +96,8 @@ class ApplicationDialog(tk.Toplevel):
 
     def submit(self):
         draft = ApplicationDraft(self.title_var.get(), self.date_var.get(), self.status_var.get(),
-                                 self.url_var.get(), self.notes.get("1.0", "end-1c"))
+                                 self.url_var.get(), self.notes.get("1.0", "end-1c"),
+                                 *(getattr(self, key + '_var').get() for key in STAGE_TIMES))
         try:
             identifier = self.service.save_application(self.company_var.get(), draft, self.identifier)
         except (ValueError, sqlite3.Error) as error:
@@ -120,12 +152,14 @@ class JobOverview(ttk.Frame):
         container.pack(fill="both", expand=True)
         container.rowconfigure(0, weight=1)
         container.columnconfigure(0, weight=1)
-        self.table = ttk.Treeview(container, columns=("company", "title", "date", "status", "url", "notes"),
+        self.table = ttk.Treeview(container, columns=("company", "title", "date", "status", *STAGE_TIMES, "url", "notes"),
                                  show="headings", selectmode="browse", style="Jobs.Treeview", height=20)
         for key, label, width in (("company", "公司", 190), ("title", "已投岗位", 220), ("date", "投递日期", 110),
-                                  ("status", "进度", 110), ("url", "岗位链接", 230), ("notes", "备注", 260)):
+                                  ("status", "进度", 100),
+                                  *((key, label, 145) for key, label in zip(STAGE_TIMES, STAGE_LABELS)),
+                                  ("url", "岗位链接", 230), ("notes", "备注", 260)):
             self.table.heading(key, text=label, anchor="w")
-            self.table.column(key, width=width, minwidth=85, stretch=key not in ("date", "status"), anchor="w")
+            self.table.column(key, width=width, minwidth=85, stretch=key not in ("date", "status", *STAGE_TIMES), anchor="w")
         vertical = ttk.Scrollbar(container, orient="vertical", command=self.table.yview)
         horizontal = ttk.Scrollbar(container, orient="horizontal", command=self.table.xview)
         self.table.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
@@ -178,7 +212,8 @@ class JobOverview(ttk.Frame):
             application = row.application
             item = f"job-{application.id}"
             self.table.insert("", "end", iid=item, values=(row.company.name, application.title,
-                application.applied_on.isoformat(), application.status, application.url,
+                application.applied_on.isoformat(), application.status,
+                *(getattr(application, key) for key in STAGE_TIMES), application.url,
                 application.notes.replace("\n", " ")))
             self.displayed_rows[item] = row
             if item in selected:

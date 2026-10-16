@@ -363,7 +363,8 @@ def version_text(record, records):
     if fields is None:
         return "已删除"
     labels = {"name": "名称", "title": "名称", "created_at": "记录时间", "goal": "目标", "status": "状态", "company": "公司",
-              "applied_on": "投递日期", "url": "链接", "notes": "备注", "planned_on": "安排日期",
+              "applied_on": "投递日期", "interview_at": "面试时间", "written_at": "笔试时间", "rejected_at": "拒绝时间",
+              "url": "链接", "notes": "备注", "planned_on": "安排日期",
               "category": "分类", "priority": "优先级", "kind": "类型", "project_id": "所属项目",
               "milestone_id": "阶段", "acceptance": "验收条件", "outcome": "成果说明",
               "completed_at": "完成时间", "resume_status": "完成前状态", "days": "待办日期",

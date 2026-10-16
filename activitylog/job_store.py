@@ -14,6 +14,8 @@ JOB_SCHEMA = (
         url TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '')""",
     "CREATE INDEX application_company ON job_applications(company_id)",
 )
+JOB_V9_SCHEMA = tuple(f"ALTER TABLE job_applications ADD COLUMN {key} TEXT NOT NULL DEFAULT ''"
+                      for key in ('interview_at', 'written_at', 'rejected_at'))
 
 
 class JobRepository:
@@ -25,16 +27,25 @@ class JobRepository:
         applications = self.db.execute("SELECT * FROM job_applications ORDER BY applied_on DESC, id DESC").fetchall()
         by_company = {company["id"]: [] for company in companies}
         for record in applications:
-            by_company[record["company_id"]].append(Application(
-                id=record["id"], company_id=record["company_id"], title=record["title"],
-                applied_on=date.fromisoformat(record["applied_on"]), status=record["status"],
-                url=record["url"], notes=record["notes"],
-            ))
+            by_company[record["company_id"]].append(self._application(record))
         return tuple(CompanyGroup(Company(company["id"], company["name"]),
                                   tuple(by_company[company["id"]])) for company in companies)
 
     def has_company(self, identifier: int) -> bool:
         return self.db.execute("SELECT 1 FROM job_companies WHERE id=?", (identifier,)).fetchone() is not None
+
+    def get_application(self, identifier):
+        row = self.db.execute('SELECT * FROM job_applications WHERE id=?', (identifier,)).fetchone()
+        if row is None:
+            raise ValueError('岗位记录已不存在，请刷新后重试。')
+        return self._application(row)
+
+    @staticmethod
+    def _application(record):
+        return Application(id=record['id'], company_id=record['company_id'], title=record['title'],
+                           applied_on=date.fromisoformat(record['applied_on']), status=record['status'],
+                           url=record['url'], notes=record['notes'], interview_at=record['interview_at'],
+                           written_at=record['written_at'], rejected_at=record['rejected_at'])
 
     def add_company(self, name: str) -> int:
         with self.db:
@@ -55,14 +66,18 @@ class JobRepository:
     def add_application(self, company_id: int, draft: ApplicationDraft) -> int:
         with self.db:
             cursor = self.db.execute("""INSERT INTO job_applications
-                (company_id, title, applied_on, status, url, notes) VALUES (?, ?, ?, ?, ?, ?)""",
-                (company_id, draft.title, draft.applied_on, draft.status, draft.url, draft.notes))
+                (company_id, title, applied_on, status, url, notes, interview_at, written_at, rejected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (company_id, draft.title, draft.applied_on, draft.status, draft.url, draft.notes,
+                 draft.interview_at, draft.written_at, draft.rejected_at))
         return cursor.lastrowid
 
     def update_application(self, identifier: int, draft: ApplicationDraft) -> None:
         with self.db:
-            cursor = self.db.execute("""UPDATE job_applications SET title=?, applied_on=?, status=?, url=?, notes=?
-                WHERE id=?""", (draft.title, draft.applied_on, draft.status, draft.url, draft.notes, identifier))
+            cursor = self.db.execute("""UPDATE job_applications SET title=?, applied_on=?, status=?, url=?, notes=?,
+                interview_at=?, written_at=?, rejected_at=? WHERE id=?""",
+                (draft.title, draft.applied_on, draft.status, draft.url, draft.notes,
+                 draft.interview_at, draft.written_at, draft.rejected_at, identifier))
             if not cursor.rowcount:
                 raise ValueError("岗位记录已不存在，请刷新后重试。")
 
@@ -95,12 +110,14 @@ class JobRepository:
                 company_id = cursor.lastrowid
             else:
                 company_id = company[0]
-            values = (company_id, draft.title, draft.applied_on, draft.status, draft.url, draft.notes)
+            values = (company_id, draft.title, draft.applied_on, draft.status, draft.url, draft.notes,
+                      draft.interview_at, draft.written_at, draft.rejected_at)
             if identifier is None:
                 cursor = self.db.execute("""INSERT INTO job_applications
-                    (company_id, title, applied_on, status, url, notes) VALUES (?, ?, ?, ?, ?, ?)""", values)
+                    (company_id, title, applied_on, status, url, notes, interview_at, written_at, rejected_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", values)
                 identifier = cursor.lastrowid
             else:
-                self.db.execute("""UPDATE job_applications SET company_id=?, title=?, applied_on=?, status=?, url=?, notes=?
-                    WHERE id=?""", values + (identifier,))
+                self.db.execute("""UPDATE job_applications SET company_id=?, title=?, applied_on=?, status=?, url=?, notes=?,
+                    interview_at=?, written_at=?, rejected_at=? WHERE id=?""", values + (identifier,))
         return identifier

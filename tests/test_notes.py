@@ -108,6 +108,8 @@ class NoteTests(unittest.TestCase):
             app.sync.apply(before, before)
             with app.store.db:
                 app.store.db.execute('DROP TABLE notes')
+                for column in ('interview_at', 'written_at', 'rejected_at'):
+                    app.store.db.execute(f'ALTER TABLE job_applications DROP COLUMN {column}')
                 app.store.db.execute('PRAGMA user_version=7')
             return before, identifier
         finally:

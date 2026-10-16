@@ -4,7 +4,8 @@ from datetime import date
 import sqlite3
 from urllib.parse import urlsplit
 from .job_store import JobRepository
-from .jobs import ApplicationDraft, APPLICATION_STATUSES, EntryHistory, JobSnapshot, job_snapshot
+from .jobs import (ApplicationDraft, APPLICATION_STATUSES, EntryHistory, JobSnapshot, job_snapshot,
+                   STAGE_TIMES, STAGE_LABELS, stage_time, application_progress)
 
 
 class JobService:
@@ -19,7 +20,8 @@ class JobService:
 
     def save_application(self, company_name: str, draft: ApplicationDraft, identifier: int | None = None) -> int:
         company_name = self._company_name(company_name)
-        draft = self._validate(draft)
+        previous = self.repository.get_application(identifier) if identifier is not None else None
+        draft = self._validate(draft, previous)
         return self.repository.save_application(company_name, draft, identifier)
 
     def add_company(self, name: str) -> int:
@@ -46,7 +48,8 @@ class JobService:
         return self.repository.add_application(company_id, draft)
 
     def update_application(self, identifier: int, draft: ApplicationDraft) -> None:
-        self.repository.update_application(identifier, self._validate(draft))
+        previous = self.repository.get_application(identifier)
+        self.repository.update_application(identifier, self._validate(draft, previous))
 
     def delete_application(self, identifier: int) -> None:
         self.repository.delete_application(identifier)
@@ -59,7 +62,7 @@ class JobService:
         return name
 
     @staticmethod
-    def _validate(draft: ApplicationDraft) -> ApplicationDraft:
+    def _validate(draft: ApplicationDraft, previous=None) -> ApplicationDraft:
         title = draft.title.strip()
         if not title:
             raise ValueError("请填写已投岗位名称。")
@@ -78,4 +81,11 @@ class JobService:
                 valid_url = False
             if not valid_url or any(character.isspace() for character in url):
                 raise ValueError("岗位链接请填写完整的 http:// 或 https:// 地址。")
-        return ApplicationDraft(title, applied_on, draft.status, url, draft.notes.strip())
+        times = []
+        for key, label in zip(STAGE_TIMES, STAGE_LABELS):
+            try:
+                times.append(stage_time(getattr(draft, key)))
+            except ValueError as error:
+                raise ValueError(f'{label}请使用有效的 YYYY-MM-DD 或 YYYY-MM-DD HH:MM。') from error
+        status = application_progress(draft.status, *times, previous=previous)
+        return ApplicationDraft(title, applied_on, status, url, draft.notes.strip(), *times)

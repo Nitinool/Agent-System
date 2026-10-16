@@ -162,7 +162,8 @@ class ProjectSchemaTests(unittest.TestCase):
             original = self.version_three(path)
             with Store(path) as store:
                 for table in original.keys() - {"tasks"}:
-                    self.assertEqual([tuple(row) for row in store.db.execute(f"SELECT * FROM {table}")], original[table])
+                    expected = [row + ('', '', '') for row in original[table]] if table == 'job_applications' else original[table]
+                    self.assertEqual([tuple(row) for row in store.db.execute(f"SELECT * FROM {table}")], expected)
                 tasks = TaskService(TaskRepository(store.db), today=lambda: date(2026, 10, 4))
                 self.assertEqual(tasks.get(5).status, "待开始")
                 self.assertEqual(tasks.get(8).status, "已完成")

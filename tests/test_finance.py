@@ -149,6 +149,8 @@ class FinanceMigrationTests(unittest.TestCase):
             with app.store.db:
                 app.store.db.execute("DROP TABLE finance_entries")
                 app.store.db.execute('DROP TABLE notes')
+                for column in ('interview_at', 'written_at', 'rejected_at'):
+                    app.store.db.execute(f'ALTER TABLE job_applications DROP COLUMN {column}')
                 app.store.db.execute('DROP TRIGGER sync_insert_projects')
                 app.store.db.execute('DROP TRIGGER project_identity')
                 app.store.db.execute('DROP INDEX project_keys')

@@ -8,13 +8,13 @@ from collections.abc import Iterable
 from .analysis import merge_for_display
 from .export import export_csv
 from .models import Activity, CATEGORIES, Segment, stamp
-from .job_store import JOB_SCHEMA
+from .job_store import JOB_SCHEMA, JOB_V9_SCHEMA
 from .task_store import TASK_SCHEMA, TASK_V4_MIGRATION, TASK_V5_SCHEMA, TASK_V7_SCHEMA
 from .project_store import PROJECT_SCHEMA, PROJECT_V5_SCHEMA, PROJECT_V7_SCHEMA
 from .finance_store import FINANCE_SCHEMA
 from .note_store import NOTE_SCHEMA
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 RECORDING_SCHEMA = (
     """CREATE TABLE segments (
         id INTEGER PRIMARY KEY, start_time TEXT NOT NULL, last_seen TEXT NOT NULL,
@@ -28,7 +28,7 @@ RECORDING_SCHEMA = (
         segment_id INTEGER PRIMARY KEY REFERENCES segments(id) ON DELETE CASCADE,
         category TEXT NOT NULL)""",
 )
-SCHEMA = RECORDING_SCHEMA + JOB_SCHEMA + PROJECT_SCHEMA + TASK_SCHEMA + PROJECT_V5_SCHEMA + TASK_V5_SCHEMA + FINANCE_SCHEMA + PROJECT_V7_SCHEMA + TASK_V7_SCHEMA + NOTE_SCHEMA
+SCHEMA = RECORDING_SCHEMA + JOB_SCHEMA + PROJECT_SCHEMA + TASK_SCHEMA + PROJECT_V5_SCHEMA + TASK_V5_SCHEMA + FINANCE_SCHEMA + PROJECT_V7_SCHEMA + TASK_V7_SCHEMA + NOTE_SCHEMA + JOB_V9_SCHEMA
 
 
 class UnsupportedSchemaError(sqlite3.DatabaseError):
@@ -61,11 +61,11 @@ class Store:
         tables = self.db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if version == SCHEMA_VERSION:
             return
-        if version in (1, 2, 3, 4, 5, 6, 7):
+        if version in (1, 2, 3, 4, 5, 6, 7, 8):
             # Add the new feature tables without rewriting recorded activities.
             with self.db:
                 self.db.execute("BEGIN")
-                statements = (() if version in (4, 5, 6, 7) else
+                statements = (() if version in (4, 5, 6, 7, 8) else
                               (JOB_SCHEMA if version == 1 else ()) + PROJECT_SCHEMA
                               + (TASK_V4_MIGRATION if version == 3 else TASK_SCHEMA))
                 if version < 5:
@@ -74,7 +74,9 @@ class Store:
                     statements += FINANCE_SCHEMA
                 if version < 7:
                     statements += PROJECT_V7_SCHEMA + TASK_V7_SCHEMA
-                statements += NOTE_SCHEMA
+                if version < 8:
+                    statements += NOTE_SCHEMA
+                statements += JOB_V9_SCHEMA
                 for statement in statements:
                     self.db.execute(statement)
                 if version < 7 and any(row[0] == 'sync_entities' for row in tables):

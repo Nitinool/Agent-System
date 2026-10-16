@@ -6,7 +6,7 @@ from datetime import date, datetime
 import json
 import re
 
-from .jobs import APPLICATION_STATUSES
+from .jobs import APPLICATION_STATUSES, STAGE_TIMES, stage_time, application_progress
 from .projects import PROJECT_STATUSES, PROJECT_MODES
 from .tasks import TASK_CATEGORIES, TASK_KINDS, TASK_PRIORITIES, TASK_STATUSES
 from .finance import INCOME_STATUSES, MAX_AMOUNT_CENTS
@@ -28,6 +28,8 @@ LEGACY_FIELDS = dict(FIELDS)
 FIELDS['projects'] += ('priority', 'mode')
 FIELDS['tasks'] += ('range_start', 'range_end', 'excluded_days')
 FIELDS['notes'] = ('title', 'created_at')
+V4_FIELDS = dict(FIELDS)
+FIELDS['job_applications'] += STAGE_TIMES
 
 
 def upgrade_records(records):
@@ -39,7 +41,8 @@ def upgrade_records(records):
             continue
         fields = record['fields']
         defaults = {'projects': {'priority': '普通', 'mode': '目标型'},
-                    'tasks': {'range_start': None, 'range_end': None, 'excluded_days': []}}.get(record.get('kind'), {})
+                    'tasks': {'range_start': None, 'range_end': None, 'excluded_days': []},
+                    'job_applications': {key: '' for key in STAGE_TIMES}}.get(record.get('kind'), {})
         for key, value in defaults.items():
             fields.setdefault(key, value)
     return records
@@ -114,6 +117,11 @@ def validate(records):
                 names.add(name)
             if kind == "job_applications":
                 if not fields["company"].strip() or fields["status"] not in APPLICATION_STATUSES:
+                    raise ValueError()
+                times = [fields[key] for key in STAGE_TIMES]
+                if any(stage_time(value) != value for value in times):
+                    raise ValueError()
+                if application_progress(fields['status'], *times) != fields['status']:
                     raise ValueError()
                 if fields["url"]:
                     from urllib.parse import urlsplit
@@ -197,7 +205,9 @@ def encode(records):
     records = upgrade_records(records)
     validate(records)
     kinds = {record['kind'] for record in records.values()}
-    if 'notes' in kinds:
+    if 'job_applications' in kinds:
+        version = 5
+    elif 'notes' in kinds:
         version = 4
     elif kinds & {'projects', 'tasks'}:
         version = 3
@@ -222,14 +232,15 @@ def decode(content):
                 result[key] = value
             return result
         payload = json.loads(content, object_pairs_hook=unique_keys)
-        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2, 3, 4):
+        if set(payload) != {"format", "version", "records"} or payload["format"] != "agent-system-data" or type(payload["version"]) is not int or payload["version"] not in (1, 2, 3, 4, 5):
             raise ValueError()
         if payload['version'] < 4 and any(r['kind'] == 'notes' for r in payload['records'].values()):
             raise ValueError()
         validate(payload["records"])
         if payload['version'] >= 3:
             for record in payload['records'].values():
-                if record['fields'] is not None and set(record['fields']) != set(FIELDS[record['kind']]):
+                expected_fields = FIELDS if payload['version'] >= 5 else V4_FIELDS
+                if record['fields'] is not None and set(record['fields']) != set(expected_fields[record['kind']]):
                     raise ValueError()
         if payload["version"] == 1 and any(r["kind"] == "finance_entries" for r in payload["records"].values()):
             raise ValueError()

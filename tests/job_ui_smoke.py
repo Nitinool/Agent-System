@@ -59,6 +59,31 @@ def main():
             assert len(panel.table.get_children()) == 1
             assert panel.table.item(f"job-{first.id}", "values")[0] == "测试甲公司"
             assert "1 家公司" in panel.summary.get()
+            dialog = panel.edit_application()
+            dialog.written_at_var.set('2026-10-17 09:30')
+            assert dialog.status_var.get() == '笔试中'
+            dialog.interview_at_var.set('2026-10-18 14:00')
+            assert dialog.status_var.get() == '面试中'
+            dialog.rejected_at_var.set('2026-10-19')
+            assert dialog.status_var.get() == '已拒绝'
+            dialog.rejected_at_var.set('')
+            assert dialog.status_var.get() == '面试中'
+            dialog.interview_at_var.set('')
+            assert dialog.status_var.get() == '笔试中'
+            dialog.written_at_var.set('')
+            assert dialog.status_var.get() == '已投递'
+            dialog.interview_at_var.set('2026-02-30')
+            dialog.submit()
+            assert '面试时间' in dialog.error.get() and dialog.winfo_exists()
+            assert panel.service.repository.get_application(first.id).interview_at == ''
+            dialog.interview_at_var.set('2026-10-18 14:00')
+            dialog.written_at_var.set('2026-10-17 09:30')
+            root.geometry('1100x700+30+30')
+            root.deiconify()
+            root.update()
+            assert dialog.winfo_height() < 650
+            dialog.submit()
+            assert panel.table.item(f'job-{first.id}', 'values')[3:7] == ('面试中', '2026-10-18 14:00', '2026-10-17 09:30', '')
             dialog = panel.add_application()
             assert tuple(dialog.company_combo["values"]) == ("测试甲公司",)
             assert tuple(dialog.title_combo["values"]) == ("Python 开发",)
@@ -80,6 +105,8 @@ def main():
             panel.edit_button.invoke()
             dialog = current_dialog(root)
             assert dialog.company_var.get() == "测试甲公司"
+            assert dialog.interview_at_var.get() == '2026-10-18 14:00'
+            assert dialog.written_at_var.get() == '2026-10-17 09:30'
             assert set(dialog.company_combo["values"]) == {"测试甲公司", "测试乙公司"}
             dialog.company_var.set("测试乙公司")
             dialog.status_var.set("已获 Offer")
@@ -110,7 +137,7 @@ def main():
                 panel.service.save_application(f"列表测试公司{index}", ApplicationDraft("开发", "2026-10-04"))
             panel.refresh()
             assert len(panel.table.get_children()) == 32
-            assert panel.table["columns"] == ("company", "title", "date", "status", "url", "notes")
+            assert panel.table["columns"] == ("company", "title", "date", "status", "interview_at", "written_at", "rejected_at", "url", "notes")
             assert "32 个岗位" in panel.summary.get()
             dialog = panel.add_application()
             assert "Python 开发" in dialog.title_combo["values"]
