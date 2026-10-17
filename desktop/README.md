@@ -17,6 +17,8 @@ npm run desktop
 
 仓库根目录 `启动桌面新版.cmd` 可协助定位本机工具链。另一台电脑需要独立安装上述开发工具；Python 旧版入口继续保留。
 
+`tools/develop.ps1` 含中文提示，必须保存为带 BOM 的 UTF-8，以兼容启动入口使用的 Windows PowerShell 5.1；无 BOM 时中文可能被按系统旧编码解析，产生引号 / 语句块错误。PowerShell 7 也可读取带 BOM 的版本。
+
 ## 数据与同步
 
 正式数据保存到 `%LOCALAPPDATA%/Agent-System-V2/`，包含 `activity.sqlite3`、`backups/`、`sync-settings.json` 和 DPAPI 加密的 `sync-token.dpapi`。空数据库版本 1，使用有类型的业务记录和稳定全局编号，SQLite 工作线程在事务中维护记录、删除标记与同步基线。完成历史及日期关联保存在对应事项中，与同步中的原子记录边界一致。

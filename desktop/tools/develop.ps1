@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $desktopRoot = Split-Path -Parent $PSScriptRoot
 $repositoryRoot = Split-Path -Parent $desktopRoot
 $nodeCandidate = Get-Command node -ErrorAction SilentlyContinue
@@ -9,8 +9,8 @@ if (-not $nodeDirectory -or -not (Test-Path -LiteralPath (Join-Path $nodeDirecto
 }
 if (-not $nodeDirectory) { throw '请先安装 Node.js 24（含 npm），配置见 desktop/README.md。' }
 $env:PATH = $nodeDirectory + ';' + (Join-Path $env:USERPROFILE '.cargo\bin') + ';' + $env:PATH
-$nodeMajor = & (Join-Path $nodeDirectory 'node.exe') -p 'process.versions.node.split(".")[0]'
-if ($nodeMajor -ne '24') { throw '新版开发环境需要 Node.js 24。' }
+$nodeVersion = & (Join-Path $nodeDirectory 'node.exe') --version
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v24\.') { throw '新版开发环境需要 Node.js 24。' }
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw '请先安装 Rust MSVC 工具链，配置见 desktop/README.md。' }
 Push-Location -LiteralPath $desktopRoot
 try {
