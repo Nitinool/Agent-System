@@ -1,6 +1,6 @@
 [package]
 name = "agent-system"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -27,7 +27,7 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "system-proxy"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
 ts-rs = { version = "11", features = ["serde-json-impl", "no-serde-warnings"] }
 base64 = "0.22"
 tauri = { version = "2", optional = true, features = [] }

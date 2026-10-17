@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { NDrawer, NDrawerContent, NModal } from 'naive-ui'
 import { useApp } from '../state'
 import { priorities, categories, jobStatuses, amount, today } from '../domain'
 import { errorText } from '../bridge'
 import type { Mutation } from '../bindings/Mutation'
 const app = useApp(),
+  router = useRouter(),
   localError = ref(''),
   discard = ref(false),
   initial = ref('')
+const categoryTouched = ref(false)
+let initializing = false
 const f = reactive({
   name: '',
   goal: '',
@@ -16,6 +20,7 @@ const f = reactive({
   start: '',
   end: '',
   project_id: '',
+  milestone_id: '',
   category: '其他',
   notes: '',
   status: '',
@@ -44,6 +49,8 @@ watch(
   () => app.editor,
   (editor) => {
     if (!editor) return
+    initializing = true
+    categoryTouched.value = false
     localError.value = ''
     const r = editor.uid ? app.snapshot.records[editor.uid] : null
     Object.assign(f, {
@@ -53,7 +60,11 @@ watch(
       start: '',
       end: '',
       project_id: editor.project ?? '',
-      category: '其他',
+      milestone_id: editor.stage ?? '',
+      category:
+        editor.kind === 'tasks'
+          ? (app.projects.find((p) => p.uid === editor.project)?.data.category ?? '其他')
+          : '其他',
       notes: '',
       status:
         editor.kind === 'projects'
@@ -75,21 +86,37 @@ watch(
       side_source: '',
       settled_on: today(),
       acceptance: '',
-      position: app.stages.filter((s) => s.data.project_id === editor.project).length + 1,
+      position:
+        app.stages.filter(
+          (s) => s.data.project_id === editor.project && s.data.stage_kind === 'standard',
+        ).length + 1,
       completed_at: null,
     })
     if (r?.fields) {
       Object.assign(f, r.fields)
       if (r.kind === 'tasks') {
+        f.milestone_id = r.fields.milestone_id ?? ''
         f.start = r.fields.range_start ?? r.fields.planned_on ?? ''
         f.end = r.fields.range_end === f.start ? '' : (r.fields.range_end ?? '')
       }
       if (r.kind === 'finance_entries') f.amount = (r.fields.amount_cents / 100).toFixed(2)
     }
     initial.value = JSON.stringify(f)
+    initializing = false
   },
   { immediate: true },
 )
+watch(
+  () => f.project_id,
+  () => {
+    if (initializing || app.editor?.kind !== 'tasks') return
+    f.milestone_id = ''
+    if (!app.editor.uid && !categoryTouched.value)
+      f.category = app.projects.find((p) => p.uid === f.project_id)?.data.category ?? '其他'
+  },
+  { flush: 'sync' },
+)
+const availableStages = computed(() => app.stages.filter((s) => s.data.project_id === f.project_id))
 function close() {
   if (JSON.stringify(f) !== initial.value) discard.value = true
   else void app.openEditor(null)
@@ -102,6 +129,7 @@ async function save() {
   try {
     switch (e.kind) {
       case 'tasks':
+        if (f.project_id && !f.milestone_id) throw { message: '请选择所属阶段。' }
         mutation = {
           type: 'save_task',
           uid: e.uid ?? null,
@@ -112,7 +140,7 @@ async function save() {
             project_id: f.project_id || null,
             category: f.category,
             notes: f.notes,
-            milestone_id: e.stage ?? null,
+            milestone_id: f.project_id ? f.milestone_id || null : null,
           },
         }
         break
@@ -126,6 +154,7 @@ async function save() {
             status: f.status,
             priority: f.priority,
             mode: f.mode,
+            category: f.category,
           },
         }
         break
@@ -134,6 +163,7 @@ async function save() {
           type: 'save_milestone',
           uid: e.uid ?? null,
           draft: {
+            stage_kind: 'standard',
             project_id: f.project_id,
             name: f.name,
             acceptance: f.acceptance,
@@ -180,8 +210,14 @@ async function save() {
       default:
         return
     }
-    if (await app.change(mutation)) await app.openEditor(null)
-    else localError.value = app.error
+    if (await app.change(mutation)) {
+      const created =
+        e.kind === 'projects' && !e.uid
+          ? app.projects.find((p) => p.data.name === f.name.trim())
+          : null
+      await app.openEditor(null)
+      if (created) await router.push({ path: '/projects', query: { id: created.uid } })
+    } else localError.value = app.error
   } catch (error) {
     localError.value = errorText(error)
   }
@@ -213,6 +249,11 @@ const jobPreview = computed(() =>
         <template v-if="app.editor?.kind === 'projects'"
           ><label>项目名称<input v-model="f.name" maxlength="120" autofocus required /></label
           ><label>项目目标<textarea v-model="f.goal" /></label>
+          <label
+            >分类<select v-model="f.category" aria-label="分类">
+              <option v-for="c in categories">{{ c }}</option>
+            </select></label
+          >
           <div class="two">
             <label
               >优先级<select v-model="f.priority" aria-label="优先级">
@@ -249,8 +290,15 @@ const jobPreview = computed(() =>
               <option value="">无项目</option>
               <option v-for="p in app.projects" :value="p.uid">{{ p.data.name }}</option>
             </select></label
+          ><label v-if="f.project_id"
+            >所属阶段<select v-model="f.milestone_id" aria-label="所属阶段" required>
+              <option value="" disabled>请选择阶段</option>
+              <option v-for="s in availableStages" :key="s.uid" :value="s.uid">
+                {{ s.data.name }}
+              </option>
+            </select></label
           ><label
-            >分类<select v-model="f.category" aria-label="分类">
+            >分类<select v-model="f.category" aria-label="分类" @change="categoryTouched = true">
               <option v-for="c in categories">{{ c }}</option>
             </select></label
           ><label>备注<textarea v-model="f.notes" rows="8" /></label

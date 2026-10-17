@@ -13,9 +13,11 @@ fn project() -> Project {
         status: "进行中".into(),
         priority: "普通".into(),
         mode: "探索型".into(),
+        category: "开发".into(),
     }
 }
 fn edit(title: &str, project_id: Option<String>, stage: Option<String>) -> TaskEdit {
+    let stage = stage.or_else(|| project_id.as_deref().map(rules::ideas_uid));
     TaskEdit {
         title: title.into(),
         start: Some("2026-10-17".into()),
@@ -101,6 +103,7 @@ fn task_edit_preserves_skips_memberships_hidden_fields_and_stage() {
         Mutation::SaveMilestone {
             uid: None,
             draft: Milestone {
+                stage_kind: StageKind::Standard,
                 project_id: p.clone(),
                 name: "第一阶段".into(),
                 acceptance: "旧验收字段".into(),
@@ -141,7 +144,7 @@ fn task_edit_preserves_skips_memberships_hidden_fields_and_stage() {
         &mut r,
         Mutation::SaveTask {
             uid: Some(id.clone()),
-            draft: edit("重命名", Some(p), None),
+            draft: edit("重命名", Some(p), Some(m.clone())),
         },
     );
     let t = task(&r, &id);
@@ -166,7 +169,10 @@ fn task_edit_preserves_skips_memberships_hidden_fields_and_stage() {
             draft: edit("换项目", Some(p2), None),
         },
     );
-    assert_eq!(task(&r, &id).milestone_id, None);
+    assert_eq!(
+        task(&r, &id).milestone_id,
+        task(&r, &id).project_id.as_deref().map(rules::ideas_uid)
+    );
 }
 #[test]
 fn completion_history_is_real_repeat_safe_and_survives_undo() {
@@ -266,6 +272,7 @@ fn stage_invalidated_on_reopen_and_empty_stage() {
         Mutation::SaveMilestone {
             uid: None,
             draft: Milestone {
+                stage_kind: StageKind::Standard,
                 project_id: p.clone(),
                 name: "阶段".into(),
                 acceptance: String::new(),
@@ -872,12 +879,19 @@ fn two_isolated_databases_roundtrip_all_types_history_settlement_and_deletion() 
             draft: project(),
         },
     );
-    let pid = snap.records.keys().next().unwrap().clone();
+    let pid = snap
+        .records
+        .iter()
+        .find(|(_, r)| matches!(r, Record::Project(Some(_))))
+        .unwrap()
+        .0
+        .clone();
     let snap = apply(
         &adb,
         Mutation::SaveMilestone {
             uid: None,
             draft: Milestone {
+                stage_kind: StageKind::Standard,
                 project_id: pid.clone(),
                 name: "阶段".into(),
                 acceptance: String::new(),
@@ -889,7 +903,9 @@ fn two_isolated_databases_roundtrip_all_types_history_settlement_and_deletion() 
     let mid = snap
         .records
         .iter()
-        .find(|(_, r)| r.kind() == "milestones")
+        .find(
+            |(_, r)| matches!(r,Record::Milestone(Some(m)) if m.stage_kind == StageKind::Standard),
+        )
         .unwrap()
         .0
         .clone();

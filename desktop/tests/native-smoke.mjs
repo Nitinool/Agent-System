@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import net from 'node:net'
 import { performance } from 'node:perf_hooks'
+import { seedLegacy, verifyLegacy } from './legacy-fixture.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const installed = process.argv[2] ? resolve(process.argv[2]) : null
@@ -12,6 +13,11 @@ const binary = installed ?? resolve(root, 'src-tauri/target/debug/agent-system.e
 await mkdir(join(root, '.test-data'), { recursive: true })
 const profile = await mkdtemp(join(root, '.test-data/native-'))
 const errors = []
+const legacyMode = process.argv.includes('--legacy')
+if (legacyMode) {
+  if (!installed) throw Error('Legacy verification requires an installed executable')
+  await seedLegacy(profile)
+}
 let child, browser, page
 async function freePort() {
   return new Promise((resolve) => {
@@ -94,7 +100,8 @@ async function close() {
 }
 try {
   const startupMs = await start()
-  expect((await ipc('snapshot')).records).toEqual({})
+  if (legacyMode) await verifyLegacy((await ipc('snapshot')).records, profile)
+  else expect((await ipc('snapshot')).records).toEqual({})
   expect((await ipc('capture_status')).running).toBe(false)
   expect((await ipc('sync_status')).has_token).toBe(false)
   await page.getByRole('textbox', { name: '随笔内容' }).fill('真实 Tauri 随笔')
@@ -103,13 +110,21 @@ try {
   await page.getByRole('navigation').getByRole('link', { name: '项目', exact: true }).click()
   await page.getByRole('button', { name: '新建项目', exact: false }).click()
   await page.getByLabel('项目名称', { exact: true }).fill('桌面重构验收')
+  await page.getByLabel('分类', { exact: true }).selectOption('开发')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('heading', { name: '桌面重构验收', exact: false })).toBeVisible()
   await page.getByRole('button', { name: '新增阶段', exact: false }).click()
   await page.getByLabel('阶段标题').fill('第一阶段')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByText('第一阶段', { exact: true })).toBeVisible()
-  await page.locator('details.stage').getByRole('button', { name: '事项', exact: false }).click()
+  const formal = page
+    .locator('details.stage')
+    .filter({ has: page.locator('summary > span', { hasText: '第一阶段' }) })
+  await expect(page.locator('details.stage')).toHaveCount(2)
+  await expect(page.getByText('暂无正式事项', { exact: true })).toBeVisible()
+  await formal.getByRole('button', { name: '事项', exact: false }).click()
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('开发')
+  await expect(page.getByLabel('所属阶段', { exact: true })).not.toHaveValue('')
   await page.getByLabel('事项名称').fill('真实 Rust 事项')
   const day = new Date().toLocaleDateString('sv-SE')
   await page.getByLabel('开始日期', { exact: true }).fill(day)
@@ -121,16 +136,43 @@ try {
   await page.getByRole('button', { name: '撤销完成操作' }).click()
   await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).not.toBeChecked()
   let snapshot = await ipc('snapshot')
-  const task = Object.values(snapshot.records).find((r) => r.kind === 'tasks').fields
+  const task = Object.values(snapshot.records).find(
+    (r) => r.kind === 'tasks' && r.fields?.title === '真实 Rust 事项',
+  ).fields
   expect(task.completions).toHaveLength(1)
   expect(task.completions[0].reopened_at).toBeTruthy()
+  await page.getByRole('navigation').getByRole('link', { name: '项目', exact: true }).click()
+  await page.getByRole('button', { name: /桌面重构验收/ }).click()
+  await formal.getByRole('checkbox', { name: '完成 真实 Rust 事项' }).click()
+  await expect(formal.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).toBeChecked()
+  await expect(page.locator('.project-progress')).toContainText('100%')
+  await formal.getByRole('button', { name: '真实 Rust 事项', exact: false }).click()
+  const beforeMove = (await ipc('snapshot')).records
+  const ideasId = Object.entries(beforeMove).find(
+    ([, r]) =>
+      r.kind === 'milestones' &&
+      r.fields?.stage_kind === 'ideas' &&
+      r.fields?.project_id === task.project_id,
+  )[0]
+  await page.getByLabel('所属阶段', { exact: true }).selectOption(ideasId)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.project-progress')).toContainText('暂无正式事项')
+  const moved = Object.values((await ipc('snapshot')).records).find(
+    (r) => r.kind === 'tasks' && r.fields?.title === '真实 Rust 事项',
+  ).fields
+  expect(moved.milestone_id).toBe(ideasId)
+  expect(moved.category).toBe('开发')
+  expect(moved.completions).toHaveLength(2)
+  await page.screenshot({ path: join(profile, 'projects-1440.png') })
   await page.getByRole('navigation').getByRole('link', { name: '求职', exact: true }).click()
   await page.getByRole('button', { name: '新增已投岗位', exact: false }).click()
   await page.getByLabel('公司', { exact: true }).fill('测试公司')
   await page.getByLabel('岗位', { exact: true }).fill('Rust 开发')
   await page.getByLabel('面试时间', { exact: true }).fill(day + ' 13:00')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.locator('.n-data-table').getByText('面试中', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.n-data-table').getByText('面试中', { exact: true }).first(),
+  ).toBeVisible()
   await page.getByRole('navigation').getByRole('link', { name: '财务', exact: true }).click()
   await page.getByRole('button', { name: '记一笔', exact: false }).click()
   await page.getByLabel('方向', { exact: true }).selectOption('收入')
@@ -213,6 +255,7 @@ try {
     workingSetSample,
     profile,
     installedRelease: !!installed,
+    legacyUpgrade: legacyMode,
     captureTest: installed
       ? 'not started; fixed-reader state machine covered by Rust tests'
       : 'fixed reader',

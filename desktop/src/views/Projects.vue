@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useApp, type Row } from '../state'
 import { today, shiftDay } from '../domain'
 import TaskList from '../components/TaskList.vue'
 const app = useApp(),
   route = useRoute(),
+  router = useRouter(),
   selected = ref(''),
-  search = ref(''),
   taskId = ref(''),
   start = ref(today()),
   end = ref('')
 watch(
-  () => [route.query.id, app.projects.length],
+  [() => route.query.id, () => app.projects.length],
   () => {
     const id = String(route.query.id ?? '')
     if (app.projects.some((p) => p.uid === id)) selected.value = id
@@ -23,43 +23,22 @@ watch(
 )
 const project = computed(() => app.projects.find((p) => p.uid === selected.value)),
   projectItems = computed(() => app.tasks.filter((t) => t.data.project_id === selected.value)),
-  items = computed(() =>
-    projectItems.value.filter(
-      (t) =>
-        t.data.project_id === selected.value &&
-        (t.data.title + '\n' + t.data.notes).toLowerCase().includes(search.value.toLowerCase()),
-    ),
-  ),
-  stages = computed(() => app.stages.filter((s) => s.data.project_id === selected.value))
+  stages = computed(() => app.stages.filter((s) => s.data.project_id === selected.value)),
+  progress = computed(() => app.progress(selected.value))
 watch(selected, () => {
   taskId.value = ''
 })
-const active = computed(() => items.value.filter((t) => t.data.status !== '已完成')),
-  done = computed(() => items.value.filter((t) => t.data.status === '已完成')),
-  future = computed(() =>
-    active.value.filter((t) => !t.data.milestone_id && !t.data.planned_on && !t.data.range_start),
-  ),
-  unstaged = computed(() =>
-    active.value.filter((t) => !t.data.milestone_id && !future.value.includes(t)),
-  ),
-  events = computed(() =>
-    projectItems.value
-      .flatMap((t) => t.data.completions.map((e) => ({ ...e, uid: t.uid })))
-      .sort((a, b) => b.completed_at.localeCompare(a.completed_at)),
-  )
-const percent = computed(() =>
-  projectItems.value.length
-    ? Math.round(
-        (projectItems.value.filter((t) => t.data.status === '已完成').length /
-          projectItems.value.length) *
-          100,
-      )
-    : 0,
-)
+watch(projectItems, (items) => {
+  if (taskId.value && !items.some((t) => t.uid === taskId.value)) taskId.value = ''
+})
 function chooseTask(row: Row<'tasks'>) {
   taskId.value = row.uid
   start.value = row.data.range_start ?? row.data.planned_on ?? today()
   end.value = row.data.range_end ?? ''
+}
+function chooseProject(uid: string) {
+  selected.value = uid
+  void router.replace({ path: '/projects', query: { id: uid } })
 }
 function period(mode: string) {
   start.value = today()
@@ -106,7 +85,7 @@ function period(mode: string) {
             v-for="p in app.projects.filter((p) => p.data.status === state)"
             :key="p.uid"
             :class="{ chosen: selected === p.uid }"
-            @click="selected = p.uid"
+            @click="chooseProject(p.uid)"
           >
             <span :class="['priority', p.data.priority]" /><span>{{ p.data.name }}</span
             ><small>#{{ p.uid.slice(0, 8).toUpperCase() }}</small>
@@ -119,43 +98,47 @@ function period(mode: string) {
           <div>
             <h2><span :class="['priority', project.data.priority]" />{{ project.data.name }}</h2>
             <small class="muted"
-              >#{{ project.uid.slice(0, 8).toUpperCase() }} · {{ project.data.mode }}</small
+              >#{{ project.uid.slice(0, 8).toUpperCase() }} · {{ project.data.category }} ·
+              {{ project.data.mode }}</small
             >
           </div>
-          <button @click="app.openEditor({ kind: 'projects', uid: project.uid })">编辑项目</button>
         </header>
+        <div class="toolbar project-actions">
+          <button @click="app.openEditor({ kind: 'milestones', project: selected })">
+            ＋ 新增阶段
+          </button>
+          <button @click="app.openEditor({ kind: 'projects', uid: project.uid })">编辑项目</button>
+        </div>
         <p v-if="project.data.goal" class="muted project-goal">{{ project.data.goal }}</p>
         <div class="project-progress">
           <div
             class="progress-band"
             :style="
               project.data.mode === '探索型'
-                ? { background: `rgba(37,99,235,${1 - Math.exp(-events.length / 12)})` }
+                ? { background: `rgba(37,99,235,${1 - Math.exp(-progress.count / 12)})` }
                 : {}
             "
           >
-            <span v-if="project.data.mode === '目标型'" :style="{ width: percent + '%' }" />
+            <span
+              v-if="project.data.mode === '目标型'"
+              :style="{ width: progress.percent + '%' }"
+            />
           </div>
           <small>{{
             project.data.mode === '目标型'
-              ? `${percent}% · ${projectItems.filter((t) => t.data.status === '已完成').length}/${projectItems.length} 完成`
-              : `累计 ${events.length} 次完成 · 当前完成 ${projectItems.filter((t) => t.data.status === '已完成').length} 项`
+              ? progress.total
+                ? `${progress.percent}% · ${progress.done}/${progress.total} 完成`
+                : '暂无正式事项'
+              : `累计 ${progress.count} 次完成 · 当前完成 ${progress.currentDone} 项`
           }}</small>
         </div>
-        <div class="toolbar">
-          <input
-            class="grow"
-            v-model="search"
-            placeholder="搜索事项 / 备注"
-            aria-label="搜索项目事项"
-          /><button @click="app.openEditor({ kind: 'milestones', project: selected })">
-            ＋ 新增阶段</button
-          ><button @click="app.openEditor({ kind: 'tasks', project: selected })">
-            ＋ 新增事项
-          </button>
-        </div>
         <div class="stages">
-          <details v-for="s in stages" :key="s.uid" open class="panel stage">
+          <details
+            v-for="s in stages"
+            :key="s.uid"
+            :open="s.data.stage_kind === 'standard'"
+            class="panel stage"
+          >
             <summary>
               <span>{{ s.data.name }}</span
               ><small class="muted"
@@ -171,69 +154,38 @@ function period(mode: string) {
               >
                 ＋ 事项</button
               ><button
+                v-if="s.data.stage_kind === 'standard'"
                 class="quiet"
                 @click.prevent="app.openEditor({ kind: 'milestones', uid: s.uid })"
               >
                 编辑</button
-              ><button class="quiet" @click.prevent="app.deleting = s.uid">删除</button>
+              ><button
+                v-if="s.data.stage_kind === 'standard'"
+                class="quiet"
+                @click.prevent="app.deleting = s.uid"
+              >
+                删除
+              </button>
             </summary>
             <TaskList
               @select="chooseTask"
-              :items="active.filter((t) => t.data.milestone_id === s.uid)"
+              :items="projectItems.filter((t) => t.data.milestone_id === s.uid)"
               :height="
                 Math.min(
                   280,
-                  Math.max(44, active.filter((t) => t.data.milestone_id === s.uid).length * 44),
+                  Math.max(
+                    44,
+                    projectItems.filter((t) => t.data.milestone_id === s.uid).length * 44,
+                  ),
                 )
               "
             />
-          </details>
-          <section v-if="unstaged.length" class="panel">
-            <div class="panel-head"><h2>未分阶段</h2></div>
-            <TaskList
-              @select="chooseTask"
-              :items="unstaged"
-              :height="Math.min(240, unstaged.length * 44)"
-            />
-          </section>
-          <details class="panel" :open="false">
-            <summary>
-              未来想法 <small class="muted">{{ future.length }}</small>
-            </summary>
-            <TaskList
-              @select="chooseTask"
-              :items="future"
-              :height="Math.min(240, Math.max(44, future.length * 44))"
-            />
-          </details>
-          <details class="panel">
-            <summary>
-              已完成事项 <small class="muted">{{ done.length }}</small>
-            </summary>
-            <TaskList
-              @select="chooseTask"
-              :items="done"
-              :height="Math.min(240, Math.max(44, done.length * 44))"
-            />
-          </details>
-          <details class="panel">
-            <summary>
-              完成历史 <small class="muted">{{ events.length }} 次</small>
-            </summary>
-            <div class="history">
-              <div v-for="(e, i) in events" :key="i">
-                <time class="muted">{{ new Date(e.completed_at).toLocaleString('zh-CN') }}</time
-                ><span>{{ e.title }}</span
-                ><small v-if="e.reopened_at" class="muted">已重新打开</small>
-              </div>
-              <div v-if="!events.length" class="empty">还没有完成记录</div>
-            </div>
           </details>
         </div>
         <div class="schedule">
           <select v-model="taskId" aria-label="安排的事项">
             <option value="">选择要安排的事项</option>
-            <option v-for="t in items" :value="t.uid">{{ t.data.title }}</option></select
+            <option v-for="t in projectItems" :value="t.uid">{{ t.data.title }}</option></select
           ><button v-for="p in ['今天', '一周', '一个月']" @click="period(p)">{{ p }}</button
           ><input v-model="start" type="date" aria-label="安排开始" /><span>至</span
           ><input v-model="end" type="date" aria-label="安排结束" /><button
@@ -346,16 +298,6 @@ summary small {
 }
 summary button:first-of-type {
   margin-left: 12px;
-}
-.history {
-  padding: 0 12px;
-}
-.history > div {
-  display: flex;
-  gap: 14px;
-  padding: 8px 0;
-  border-top: 1px solid #eef1f5;
-  font-size: 12px;
 }
 .schedule {
   position: sticky;

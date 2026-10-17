@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { amount, onDay, calendarDay, shiftDay, money } from '../src/domain'
+import { amount, onDay, calendarDay, shiftDay, money, projectProgress } from '../src/domain'
 import type { Task } from '../src/bindings/Task'
 const task: Task = {
   title: '事项',
@@ -22,6 +22,25 @@ const task: Task = {
   completions: [],
 }
 describe('money and shared date rules', () => {
+  it('excludes ideas from target progress but counts all real completions', () => {
+    const history = [
+      {
+        title: '真实完成',
+        project_id: 'p',
+        completed_at: '2026-10-17T12:00:00+08:00',
+        reopened_at: null,
+      },
+    ]
+    const idea = { ...task, status: '已完成', milestone_id: 'idea', completions: history }
+    const formal = { ...task, status: '已完成', milestone_id: 'formal', completions: history }
+    expect(
+      projectProgress([idea, formal, { ...task, milestone_id: 'formal' }], new Set(['formal'])),
+    ).toMatchObject({ total: 2, done: 1, percent: 50, count: 2, currentDone: 2 })
+    expect(projectProgress([idea], new Set())).toMatchObject({ total: 0, percent: 0, count: 1 })
+    expect(
+      projectProgress([{ ...idea, milestone_id: 'formal' }], new Set(['formal'])),
+    ).toMatchObject({ total: 1, done: 1, percent: 100 })
+  })
   it('uses integer cents without floating point rounding', () => {
     expect(amount('128.50')).toBe(12850)
     expect(amount('0.01')).toBe(1)

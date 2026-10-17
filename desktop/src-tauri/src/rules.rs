@@ -119,13 +119,22 @@ pub fn validate(records: &Records) -> Result<()> {
                 ensure(
                     ["进行中", "暂停", "已完成"].contains(&p.status.as_str())
                         && PRIORITIES.contains(&p.priority.as_str())
-                        && ["目标型", "探索型"].contains(&p.mode.as_str()),
+                        && ["目标型", "探索型"].contains(&p.mode.as_str())
+                        && CATEGORIES.contains(&p.category.as_str()),
                     "项目设置无效。",
                 )?;
+                ensure(records.values().filter(|r| matches!(r, Record::Milestone(Some(m)) if m.project_id == *uid && m.stage_kind == StageKind::Ideas)).count() == 1, "每个项目必须有一个未来想法阶段。")?;
             }
             Record::Milestone(Some(m)) => {
                 text(&m.name, 120, "阶段名称需为 1–120 字。")?;
                 reference(records, Some(&m.project_id), "projects")?;
+                ensure(
+                    m.stage_kind != StageKind::Ideas
+                        || (m.name == "未来想法"
+                            && m.completed_at.is_none()
+                            && *uid == ideas_uid(&m.project_id)),
+                    "未来想法阶段设置无效。",
+                )?;
                 if let Some(at) = &m.completed_at {
                     timestamp(at)?;
                     let tasks: Vec<_> = records
@@ -161,6 +170,10 @@ pub fn validate(records: &Records) -> Result<()> {
                 dates(&t.days)?;
                 dates(&t.excluded_days)?;
                 reference(records, t.project_id.as_deref(), "projects")?;
+                ensure(
+                    t.project_id.is_some() == t.milestone_id.is_some(),
+                    "项目事项必须选择所属阶段。",
+                )?;
                 reference(records, t.milestone_id.as_deref(), "milestones")?;
                 if let Some(mid) = &t.milestone_id {
                     if let Some(Record::Milestone(Some(m))) = records.get(mid) {
@@ -323,6 +336,7 @@ pub fn normalize(records: &mut Records) {
             }
         }
     }
+    ensure_ideas(records, false);
     let invalid: Vec<_> = records
         .iter()
         .filter_map(|(id, r)| {
@@ -337,8 +351,10 @@ pub fn normalize(records: &mut Records) {
                         }
                     })
                     .collect();
-                (tasks.is_empty() || tasks.iter().any(|t| t.status != "已完成"))
-                    .then_some(id.clone())
+                (matches!(r, Record::Milestone(Some(m)) if m.stage_kind == StageKind::Ideas)
+                    || tasks.is_empty()
+                    || tasks.iter().any(|t| t.status != "已完成"))
+                .then_some(id.clone())
             } else {
                 None
             }
@@ -368,6 +384,101 @@ pub fn normalize(records: &mut Records) {
         }
     }
 }
+/// Deterministic system-stage identity also converges independently upgraded peers.
+pub fn ideas_uid(project: &str) -> String {
+    uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        format!("agent-system-v2/{project}/ideas").as_bytes(),
+    )
+    .simple()
+    .to_string()
+}
+pub fn ensure_ideas(records: &mut Records, reuse_named: bool) {
+    let projects: Vec<_> = records
+        .iter()
+        .filter_map(|(id, r)| matches!(r, Record::Project(Some(_))).then_some(id.clone()))
+        .collect();
+    for project in projects {
+        let canonical = ideas_uid(&project);
+        let mut candidates: Vec<_> = records
+            .iter()
+            .filter_map(|(id, r)| match r {
+                Record::Milestone(Some(m))
+                    if m.project_id == project && m.stage_kind == StageKind::Ideas =>
+                {
+                    Some((id != &canonical, m.position, id.clone(), m.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if candidates.is_empty() && reuse_named {
+            candidates = records
+                .iter()
+                .filter_map(|(id, r)| match r {
+                    Record::Milestone(Some(m))
+                        if m.project_id == project && m.name == "未来想法" =>
+                    {
+                        Some((id != &canonical, m.position, id.clone(), m.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            candidates.sort_by_key(|(_, position, id, _)| (*position, id.clone()));
+            candidates.truncate(1);
+        } else {
+            candidates.sort_by_key(|(noncanonical, position, id, _)| {
+                (*noncanonical, *position, id.clone())
+            });
+        }
+        // Preserve legacy stage contents, but canonicalize identity even if it was
+        // never shared: baseline/local/remote must generate the same system UID.
+        let allowed = match records.get(&canonical) {
+            None | Some(Record::Milestone(None)) => true,
+            Some(Record::Milestone(Some(m))) => {
+                m.project_id == project && candidates.iter().any(|(_, _, id, _)| id == &canonical)
+            }
+            _ => false,
+        };
+        if !allowed {
+            continue;
+        } // Strict validation reports the collision; no overwrite.
+        let mut stage = candidates
+            .first()
+            .map(|(_, _, _, m)| m.clone())
+            .unwrap_or(Milestone {
+                stage_kind: StageKind::Ideas,
+                project_id: project.clone(),
+                name: "未来想法".into(),
+                acceptance: String::new(),
+                position: u32::MAX,
+                completed_at: None,
+            });
+        stage.stage_kind = StageKind::Ideas;
+        stage.name = "未来想法".into();
+        stage.completed_at = None;
+        records.insert(canonical.clone(), Record::Milestone(Some(stage)));
+        let duplicates: std::collections::BTreeSet<_> = candidates
+            .into_iter()
+            .map(|(_, _, id, _)| id)
+            .filter(|id| *id != canonical)
+            .collect();
+        for id in &duplicates {
+            records.insert(id.clone(), Record::Milestone(None));
+        }
+        for r in records.values_mut() {
+            if let Record::Task(Some(t)) = r {
+                if t.project_id.as_deref() == Some(&project)
+                    && (t.milestone_id.is_none()
+                        || t.milestone_id
+                            .as_ref()
+                            .is_some_and(|id| duplicates.contains(id)))
+                {
+                    t.milestone_id = Some(canonical.clone());
+                }
+            }
+        }
+    }
+}
 fn task_mut<'a>(records: &'a mut Records, uid: &str) -> Result<&'a mut Task> {
     match records.get_mut(uid) {
         Some(Record::Task(Some(t))) => Ok(t),
@@ -386,6 +497,11 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
         Mutation::SaveMilestone { uid: id, mut draft } => {
             uid = id.unwrap_or(uid);
             check_existing(records, &uid, "milestones")?;
+            ensure(
+                draft.stage_kind == StageKind::Standard
+                    && !matches!(records.get(&uid), Some(Record::Milestone(Some(m))) if m.stage_kind == StageKind::Ideas),
+                "未来想法阶段不能重命名或修改类型。",
+            )?;
             draft.name = draft.name.trim().into();
             records.insert(uid.clone(), Record::Milestone(Some(draft)));
         }
@@ -396,12 +512,11 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
                 Some(Record::Task(Some(t))) => t.as_ref().clone(),
                 _ => Task::default(),
             };
-            if task.project_id != draft.project_id {
-                task.milestone_id = None;
-            }
-            if !records.contains_key(&uid) {
-                task.milestone_id = draft.milestone_id;
-            }
+            ensure(
+                draft.project_id.is_some() == draft.milestone_id.is_some(),
+                "项目事项必须选择所属阶段。",
+            )?;
+            task.milestone_id = draft.milestone_id;
             let end = draft.end.or_else(|| draft.start.clone());
             range(draft.start.as_deref(), end.as_deref())?;
             if task.range_start != draft.start || task.range_end != end {
@@ -555,6 +670,10 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
             let r = records
                 .get(&uid)
                 .ok_or_else(|| AppError::validation("记录不存在。"))?;
+            if let Record::Milestone(Some(m)) = r {
+                ensure(m.stage_kind != StageKind::Ideas, "未来想法阶段不能删除。")?;
+                ensure(!records.values().any(|r| matches!(r, Record::Task(Some(t)) if t.milestone_id.as_ref() == Some(&uid))), "阶段中还有事项，请先移动或删除其中事项。")?;
+            }
             records.insert(uid.clone(), r.tombstone());
         }
     }

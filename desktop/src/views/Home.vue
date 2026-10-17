@@ -52,12 +52,7 @@ const options = computed(() =>
     .map((t) => ({ label: t.data.title, value: t.uid })),
 )
 function progress(uid: string) {
-  const tasks = app.tasks.filter((t) => t.data.project_id === uid)
-  return {
-    total: tasks.length,
-    done: tasks.filter((t) => t.data.status === '已完成').length,
-    count: tasks.reduce((s, t) => s + t.data.completions.length, 0),
-  }
+  return app.progress(uid)
 }
 async function addQuick() {
   if (
@@ -207,7 +202,9 @@ onBeforeUnmount(() => {
             ><div><span :class="['priority', p.data.priority]" />{{ p.data.name }}</div>
             <small class="muted">{{
               p.data.mode === '目标型'
-                ? `${progress(p.uid).done} / ${progress(p.uid).total} 完成`
+                ? progress(p.uid).total
+                  ? `${progress(p.uid).done} / ${progress(p.uid).total} 完成`
+                  : '暂无正式事项'
                 : `累计 ${progress(p.uid).count} 次完成`
             }}</small>
             <div

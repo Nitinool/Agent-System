@@ -15,6 +15,7 @@ fn main() -> Result<()> {
             status: "进行中".into(),
             priority: "普通".into(),
             mode: "探索型".into(),
+            category: "开发".into(),
         })),
     );
     let day = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -31,6 +32,7 @@ fn main() -> Result<()> {
         }
         records.insert(format!("{i:032x}"), Record::Task(Some(Box::new(task))));
     }
+    agent_system::rules::ensure_ideas(&mut records, false);
     store.import(&Records::new(), &records)?;
     let began = Instant::now();
     let snapshot = store.snapshot()?;

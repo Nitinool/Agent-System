@@ -16,6 +16,7 @@ import {
 import { useApp } from './state'
 import { call, subscribe } from './bridge'
 import { today } from './domain'
+import { version } from '../package.json'
 import Editor from './components/Editor.vue'
 import SyncSettings from './components/SyncSettings.vue'
 const app = useApp(),
@@ -116,7 +117,7 @@ onBeforeUnmount(() => {
           app.error || app.notice
         }}</span
         ><button v-if="app.undo" class="quiet" @click="app.undoCompletion">撤销完成操作</button
-        ><span class="version">V2 · 0.1.0</span>
+        ><span class="version">V2 · {{ version }}</span>
       </footer>
     </div>
     <Editor /><SyncSettings />

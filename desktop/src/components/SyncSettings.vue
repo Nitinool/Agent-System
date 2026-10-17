@@ -80,13 +80,14 @@ const labels: Record<string, string> = {
   acceptance: '验收记录',
   outcome: '成果',
   position: '阶段顺序',
+  stage_kind: '阶段类型',
 }
 function preview(r: WireRecord) {
   if (r.fields === null) return '已删除'
   return Object.entries(r.fields)
     .map(
       ([key, value]) =>
-        `${labels[key] ?? key}：${value === null || value === '' ? '未填写' : typeof value === 'object' ? JSON.stringify(value, null, 2) : value}`,
+        `${labels[key] ?? key}：${value === null || value === '' ? '未填写' : key === 'stage_kind' ? (value === 'ideas' ? '未来想法' : '普通阶段') : typeof value === 'object' ? JSON.stringify(value, null, 2) : value}`,
     )
     .join('\n')
 }

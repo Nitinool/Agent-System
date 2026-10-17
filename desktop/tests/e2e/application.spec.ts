@@ -30,7 +30,19 @@ test('1500 tasks and 150 today rows stay virtualized with stable navigation', as
         status: '进行中',
         priority: '高',
         mode: '目标型',
+        category: '开发',
       },
+    },
+  }
+  fixture['e'.repeat(32)] = {
+    kind: 'milestones',
+    fields: {
+      project_id: projectId,
+      name: '开发阶段',
+      stage_kind: 'standard',
+      position: 1,
+      acceptance: '',
+      completed_at: null,
     },
   }
   for (let i = 1; i <= 1500; i++)
@@ -47,7 +59,7 @@ test('1500 tasks and 150 today rows stay virtualized with stable navigation', as
         priority: '普通',
         kind: '任务',
         project_id: projectId,
-        milestone_id: null,
+        milestone_id: 'e'.repeat(32),
         resume_status: '待开始',
         acceptance: '',
         outcome: '',
@@ -105,7 +117,7 @@ test('1500 tasks and 150 today rows stay virtualized with stable navigation', as
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     let revision = 0
-    let records: Record<string, unknown> = {}
+    let records: Record<string, any> = {}
     let local = 0
     let fail = false
     const status = {
@@ -118,6 +130,30 @@ test.beforeEach(async ({ page }) => {
       has_token: false,
     }
     const ids: Record<string, number> = {}
+    function seedIdeas(project: string) {
+      if (
+        Object.values(records).some(
+          (r) =>
+            r.kind === 'milestones' &&
+            r.fields?.project_id === project &&
+            r.fields?.stage_kind === 'ideas',
+        )
+      )
+        return
+      const uid = '9' + (++local).toString(16).padStart(31, '0')
+      ids[uid] = local
+      records[uid] = {
+        kind: 'milestones',
+        fields: {
+          project_id: project,
+          name: '未来想法',
+          stage_kind: 'ideas',
+          position: 4294967295,
+          acceptance: '',
+          completed_at: null,
+        },
+      }
+    }
     ;(window as any).__TEST_FAIL__ = () => {
       fail = true
     }
@@ -127,6 +163,7 @@ test.beforeEach(async ({ page }) => {
           records = (window as any).__TEST_INITIAL_RECORDS__
           delete (window as any).__TEST_INITIAL_RECORDS__
           for (const id of Object.keys(records)) ids[id] = ++local
+          for (const id of Object.keys(records)) if (records[id].kind === 'projects') seedIdeas(id)
           revision++
         }
         return { revision, records, local_ids: ids }
@@ -150,11 +187,37 @@ test.beforeEach(async ({ page }) => {
             fields: { title: m.title, created_at: new Date().toISOString() },
           }
         }
-        if (m.type === 'save_project') records[id] = { kind: 'projects', fields: m.draft }
+        if (m.type === 'save_project') {
+          records[id] = { kind: 'projects', fields: m.draft }
+          seedIdeas(id)
+        }
+        if (m.type === 'save_milestone') records[id] = { kind: 'milestones', fields: m.draft }
+        if (m.type === 'complete_task') {
+          const t = records[id].fields
+          t.status = m.completed ? '已完成' : '待开始'
+          if (m.completed)
+            t.completions.push({
+              title: t.title,
+              project_id: t.project_id,
+              completed_at: new Date().toISOString(),
+              reopened_at: null,
+            })
+          else if (t.completions.length) t.completions.at(-1).reopened_at = new Date().toISOString()
+        }
+        if (m.type === 'delete') {
+          if (
+            Object.values(records).some((r) => r.kind === 'tasks' && r.fields?.milestone_id === id)
+          )
+            throw { message: '阶段中还有事项，请先移动或删除其中事项。' }
+          records[id] = { kind: records[id].kind, fields: null }
+        }
         if (m.type === 'save_finance') records[id] = { kind: 'finance_entries', fields: m.draft }
         if (m.type === 'save_job') records[id] = { kind: 'job_applications', fields: m.draft }
         if (m.type === 'save_task') {
           if (m.draft.end && !m.draft.start) throw { message: '请先填写开始日期' }
+          if (m.draft.project_id && !m.draft.milestone_id)
+            throw { message: '项目事项必须选择所属阶段。' }
+          const previous = records[id]?.fields
           records[id] = {
             kind: 'tasks',
             fields: {
@@ -164,7 +227,7 @@ test.beforeEach(async ({ page }) => {
               range_end: m.draft.end ?? m.draft.start,
               category: m.draft.category,
               notes: m.draft.notes,
-              status: '待开始',
+              status: previous?.status ?? '待开始',
               priority: '普通',
               kind: '任务',
               project_id: m.draft.project_id,
@@ -175,7 +238,7 @@ test.beforeEach(async ({ page }) => {
               completed_at: null,
               days: [],
               excluded_days: [],
-              completions: [],
+              completions: previous?.completions ?? [],
             },
           }
         }
@@ -227,7 +290,7 @@ test('project drawer save and failed task editor remains intact', async ({ page 
   await page.getByLabel('项目名称', { exact: true }).fill('重构项目')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('heading', { name: '重构项目' })).toBeVisible()
-  await page.getByRole('button', { name: '新增事项', exact: false }).click()
+  await page.locator('.stage').getByRole('button', { name: '事项', exact: false }).click()
   await page.getByLabel('事项名称').fill('测试事项')
   await page.evaluate(() => (window as any).__TEST_FAIL__())
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -235,15 +298,19 @@ test('project drawer save and failed task editor remains intact', async ({ page 
   await expect(page.locator('#entity-editor').getByRole('alert')).toContainText('模拟磁盘写入失败')
 })
 
-test('project search keeps true stage progress and scheduling selects task identity', async ({
-  page,
-}) => {
+test('compact stages retain counts and scheduling selects task identity', async ({ page }) => {
   const project = 'a'.repeat(32),
     other = 'b'.repeat(32),
     stage = 'c'.repeat(32)
   const first = 'd'.repeat(32),
     second = 'e'.repeat(32)
-  const projectFields = { goal: '', status: '进行中', priority: '普通', mode: '目标型' }
+  const projectFields = {
+    goal: '',
+    status: '进行中',
+    priority: '普通',
+    mode: '目标型',
+    category: '开发',
+  }
   const taskFields = {
     planned_on: null,
     range_start: null,
@@ -276,9 +343,9 @@ test('project search keeps true stage progress and scheduling selects task ident
           project_id: project,
           name: '第一阶段',
           position: 0,
-          goal: '',
+          stage_kind: 'standard',
           acceptance: '',
-          verified_at: null,
+          completed_at: null,
         },
       },
       [first]: { kind: 'tasks', fields: { ...taskFields, title: '事项' } },
@@ -286,15 +353,144 @@ test('project search keeps true stage progress and scheduling selects task ident
     },
   )
   await page.goto('/#/projects?id=' + project)
-  await expect(page.locator('.stage summary')).toContainText('0 / 2')
-  await page.getByLabel('搜索项目事项').fill('延长')
-  await expect(page.locator('.task-row')).toHaveCount(1)
-  await expect(page.locator('.stage summary')).toContainText('0 / 2')
-  await page.locator('.task-row').dispatchEvent('click')
+  const formal = page
+    .locator('.stage')
+    .filter({ has: page.locator('summary > span', { hasText: '第一阶段' }) })
+  await expect(formal.locator('summary')).toContainText('0 / 2')
+  await expect(page.getByLabel('搜索项目事项')).toHaveCount(0)
+  await expect(page.getByText('完成历史', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('已完成事项', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '新增事项', exact: false })).toHaveCount(0)
+  await page.locator('.task-row').filter({ hasText: '事项延长' }).dispatchEvent('click')
   await expect(page.getByLabel('安排的事项')).toHaveValue(second)
   await page.getByRole('button', { name: /另一个项目/ }).click()
   await expect(page.getByLabel('安排的事项')).toHaveValue('')
 })
+test('category defaults respect overrides and every project editor requires a stage', async ({
+  page,
+}) => {
+  await page.goto('/#/projects')
+  const created: Record<string, string> = {}
+  for (const [name, category] of [
+    ['项目甲', '开发'],
+    ['项目乙', '学习'],
+  ]) {
+    await page.getByRole('button', { name: '新建项目', exact: false }).click()
+    await page.getByLabel('项目名称', { exact: true }).fill(name!)
+    await page.getByLabel('分类', { exact: true }).selectOption(category!)
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(page.getByRole('heading', { name: name!, exact: true })).toBeVisible()
+    created[name!] = await page.evaluate(async (name) => {
+      const s = await (window as any).__TEST_BRIDGE__('snapshot', {})
+      return Object.entries(s.records).find(
+        ([, r]: any) => r.kind === 'projects' && r.fields.name === name,
+      )![0]
+    }, name)
+  }
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await page.getByRole('button', { name: '新增事项', exact: false }).click()
+  await page.getByLabel('事项名称').fill('跨项目草稿')
+  await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目甲']!)
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('开发')
+  await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('#entity-editor')).toBeVisible()
+  await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目乙']!)
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('学习')
+  const ideas = await page
+    .getByLabel('所属阶段', { exact: true })
+    .locator('option')
+    .last()
+    .getAttribute('value')
+  await page.getByLabel('所属阶段', { exact: true }).selectOption(ideas!)
+  await page.getByLabel('分类', { exact: true }).selectOption('生活')
+  await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目甲']!)
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('生活')
+  await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue('')
+  const ideaA = await page
+    .getByLabel('所属阶段', { exact: true })
+    .locator('option')
+    .last()
+    .getAttribute('value')
+  await page.getByLabel('所属阶段', { exact: true }).selectOption(ideaA!)
+  await page.evaluate(() => (window as any).__TEST_FAIL__())
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue(ideaA!)
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('生活')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '项目', exact: true }).click()
+  await page.getByRole('button', { name: /项目甲/ }).click()
+  await page.getByRole('button', { name: '编辑项目', exact: true }).click()
+  await page.getByLabel('分类', { exact: true }).selectOption('沟通')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const ideaStage = page
+    .locator('.stage')
+    .filter({ has: page.locator('summary > span', { hasText: '未来想法' }) })
+  await expect(ideaStage).not.toHaveAttribute('open', '')
+  await expect(ideaStage.getByRole('button', { name: '编辑', exact: true })).toHaveCount(0)
+  await expect(ideaStage.getByRole('button', { name: '删除', exact: true })).toHaveCount(0)
+  await ideaStage.locator('summary').click()
+  await ideaStage.getByRole('button', { name: '跨项目草稿', exact: false }).click()
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('生活')
+  await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue(ideaA!)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '事项', exact: true }).click()
+  await page.getByRole('button', { name: '新增事项', exact: false }).click()
+  await page.getByLabel('事项名称').fill('月历项目事项')
+  await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目甲']!)
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('沟通')
+  await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue('')
+  await page.getByLabel('所属阶段', { exact: true }).selectOption(ideaA!)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('#entity-editor')).toHaveCount(0)
+})
+
+test('completed items stay in their stage and ideas do not inflate target progress', async ({
+  page,
+}) => {
+  await page.goto('/#/projects')
+  await page.getByRole('button', { name: '新建项目', exact: false }).click()
+  await page.getByLabel('项目名称', { exact: true }).fill('阶段反馈')
+  await page.getByLabel('分类', { exact: true }).selectOption('开发')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '新增阶段', exact: false }).click()
+  await page.getByLabel('阶段标题').fill('开发阶段')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const formal = page
+    .locator('.stage')
+    .filter({ has: page.locator('summary > span', { hasText: '开发阶段' }) })
+  for (const title of ['功能甲', '功能乙']) {
+    await formal.getByRole('button', { name: '事项', exact: false }).click()
+    await page.getByLabel('事项名称').fill(title)
+    await expect(page.getByLabel('分类', { exact: true })).toHaveValue('开发')
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+  }
+  await formal.getByRole('checkbox', { name: '完成 功能甲' }).click()
+  await expect(formal.getByRole('checkbox', { name: '完成 功能甲' })).toBeChecked()
+  await expect(formal.locator('.task-row').last()).toHaveClass(/done/)
+  await expect(page.locator('.project-progress')).toContainText('50%')
+  await formal.getByRole('button', { name: '功能甲', exact: false }).click()
+  const idea = await page
+    .getByLabel('所属阶段', { exact: true })
+    .locator('option')
+    .last()
+    .getAttribute('value')
+  await page.getByLabel('所属阶段', { exact: true }).selectOption(idea!)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.project-progress')).toContainText('0%')
+  const ideas = page
+    .locator('.stage')
+    .filter({ has: page.locator('summary > span', { hasText: '未来想法' }) })
+  await ideas.locator('summary').click()
+  await expect(ideas.getByRole('checkbox', { name: '完成 功能甲' })).toBeChecked()
+  await page.screenshot({ path: 'test-results/projects-1440.png' })
+  await page.setViewportSize({ width: 1100, height: 700 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/projects-1100.png' })
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await expect(page.locator('.home-project')).toContainText('0 / 1 完成')
+})
+
 for (const scale of [1.25, 1.5])
   test(`layout at 1100x700 and ${scale * 100}% scale`, async ({ browser }) => {
     const context = await browser.newContext({

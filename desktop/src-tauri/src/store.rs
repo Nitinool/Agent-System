@@ -1,5 +1,5 @@
 //! SQLite is owned by one worker. Business operations validate before committing.
-use crate::{model::*, rules};
+use crate::{compatibility, model::*, rules};
 use chrono::Local;
 use rusqlite::{params, Connection};
 use std::{
@@ -16,7 +16,66 @@ INSERT INTO state VALUES('revision','0');
 INSERT INTO state VALUES('baseline','{}');
 CREATE TABLE segments(id INTEGER PRIMARY KEY,start TEXT NOT NULL,last_seen TEXT NOT NULL,end TEXT,seconds REAL NOT NULL CHECK(seconds>=0),app TEXT NOT NULL,process TEXT NOT NULL,title TEXT NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,reason TEXT NOT NULL,resume_reason TEXT NOT NULL,category TEXT NOT NULL);
 CREATE INDEX segment_dates ON segments(start,last_seen);
-PRAGMA user_version=1;";
+PRAGMA user_version=2;";
+
+fn migrate_v1(db: &Connection, path: &Path) -> Result<()> {
+    let external: u32 = db.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+    let backups = path.parent().unwrap().join("backups");
+    std::fs::create_dir_all(&backups)?;
+    let mut backup = Connection::open(backups.join(format!(
+        "before-upgrade-v1-v2-{}.sqlite3",
+        Local::now().format("%Y%m%d-%H%M%S-%f")
+    )))?;
+    rusqlite::backup::Backup::new(db, &mut backup)?.run_to_completion(
+        64,
+        std::time::Duration::from_millis(1),
+        None,
+    )?;
+    drop(backup);
+    let tx = db.unchecked_transaction()?;
+    // Acquire a write lock before reading, and reject concurrent migration/writes.
+    tx.execute("UPDATE state SET value=value WHERE key='revision'", [])?;
+    let current: u32 = tx.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+    if current != external || tx.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))? != 1
+    {
+        return Err(AppError::new(
+            "local_changed",
+            "升级期间数据有修改，请关闭其他窗口后重试。",
+        ));
+    }
+    let mut old = serde_json::Map::new();
+    {
+        let mut statement = tx.prepare("SELECT uid,payload FROM records ORDER BY local_id")?;
+        for row in
+            statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        {
+            let (uid, payload) = row?;
+            old.insert(uid, serde_json::from_str(&payload)?);
+        }
+    }
+    let records = compatibility::legacy_records(serde_json::Value::Object(old.clone()))?;
+    let baseline: String =
+        tx.query_row("SELECT value FROM state WHERE key='baseline'", [], |r| {
+            r.get(0)
+        })?;
+    let baseline = compatibility::legacy_records(serde_json::from_str(&baseline)?)?;
+    for (uid, record) in &records {
+        if old.get(uid) != Some(&serde_json::to_value(record)?) {
+            tx.execute("INSERT INTO records(uid,kind,payload) VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET kind=excluded.kind,payload=excluded.payload", params![uid, record.kind(), serde_json::to_string(record)?])?;
+        }
+    }
+    tx.execute(
+        "UPDATE state SET value=? WHERE key='baseline'",
+        [serde_json::to_string(&baseline)?],
+    )?;
+    tx.execute(
+        "UPDATE state SET value=CAST(value AS INTEGER)+1 WHERE key='revision'",
+        [],
+    )?;
+    tx.execute_batch("PRAGMA user_version=2;")?;
+    tx.commit()?;
+    Ok(())
+}
 
 pub struct Store {
     pub db: Connection,
@@ -42,7 +101,9 @@ impl Store {
             let tx = db.unchecked_transaction()?;
             tx.execute_batch(SCHEMA)?;
             tx.commit()?;
-        } else if version != 1 {
+        } else if version == 1 {
+            migrate_v1(&db, path)?;
+        } else if version != 2 {
             return Err(AppError::new(
                 "schema",
                 "此数据库不是新版支持的数据文件，未修改文件。",

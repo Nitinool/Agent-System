@@ -1,4 +1,15 @@
 import type { Task } from './bindings/Task'
+export function projectProgress(tasks: Task[], formalStageIds: ReadonlySet<string>) {
+  const formal = tasks.filter((t) => t.milestone_id && formalStageIds.has(t.milestone_id))
+  const done = formal.filter((t) => t.status === '已完成').length
+  return {
+    total: formal.length,
+    done,
+    percent: formal.length ? Math.round((done / formal.length) * 100) : 0,
+    count: tasks.reduce((n, t) => n + t.completions.length, 0),
+    currentDone: tasks.filter((t) => t.status === '已完成').length,
+  }
+}
 export const priorities = ['紧急', '高', '普通', '低']
 export const categories = ['其他', '开发', '学习', '求职', '生活', '娱乐', '沟通']
 export const jobStatuses = ['已投递', '笔试中', '面试中', '已获 Offer', '已拒绝', '已撤回']

@@ -1,7 +1,7 @@
 import { computed, ref, toRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { call, errorText } from './bridge'
-import { today, onDay } from './domain'
+import { today, onDay, projectProgress } from './domain'
 import type { Snapshot } from './bindings/Snapshot'
 import type { Mutation } from './bindings/Mutation'
 import type { Record as WireRecord } from './bindings/Record'
@@ -81,8 +81,23 @@ export const useApp = defineStore('application', () => {
     ),
   )
   const stages = computed(() =>
-    rows('milestones').sort((a, b) => a.data.position - b.data.position),
+    rows('milestones').sort(
+      (a, b) =>
+        Number(a.data.stage_kind === 'ideas') - Number(b.data.stage_kind === 'ideas') ||
+        a.data.position - b.data.position ||
+        a.uid.localeCompare(b.uid),
+    ),
   )
+  function progress(uid: string) {
+    return projectProgress(
+      tasks.value.filter((t) => t.data.project_id === uid).map((t) => t.data),
+      new Set(
+        stages.value
+          .filter((s) => s.data.project_id === uid && s.data.stage_kind === 'standard')
+          .map((s) => s.uid),
+      ),
+    )
+  }
   const todayTasks = computed(() => tasks.value.filter((t) => onDay(t.data, day.value)))
   function accept(next: Snapshot) {
     if (next.revision >= snapshot.value.revision) snapshot.value = next
@@ -197,6 +212,7 @@ export const useApp = defineStore('application', () => {
     jobs,
     finances,
     stages,
+    progress,
     todayTasks,
     refresh,
     statuses,

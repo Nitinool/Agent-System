@@ -1,5 +1,5 @@
 //! Private GitHub transport, validated wire format and record-level three-way merge.
-use crate::{model::*, rules, store::Database};
+use crate::{compatibility, model::*, rules, store::Database};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -27,7 +27,9 @@ struct Payload {
 pub fn encode(records: &Records) -> Result<String> {
     rules::validate(records)?;
     let kinds: Vec<_> = records.values().map(Record::kind).collect();
-    let version = if kinds.contains(&"job_applications") {
+    let version = if kinds.contains(&"projects") || kinds.contains(&"milestones") {
+        6
+    } else if kinds.contains(&"job_applications") {
         5
     } else if kinds.contains(&"notes") {
         4
@@ -125,7 +127,7 @@ pub fn decode(text: &str) -> Result<Records> {
     let Unique(mut value) = serde_json::from_str(text)?;
     let version = value["version"]
         .as_u64()
-        .filter(|n| (1..=5).contains(n))
+        .filter(|n| (1..=6).contains(n))
         .ok_or_else(|| AppError::validation("同步版本不受支持。"))?;
     if let Some(records) = value["records"].as_object_mut() {
         for r in records.values_mut() {
@@ -164,9 +166,15 @@ pub fn decode(text: &str) -> Result<Records> {
             }
         }
     }
-    let payload: Payload = serde_json::from_value(value)?;
+    if version < 6 {
+        compatibility::upgrade_fields(&mut value["records"])?;
+    }
+    let mut payload: Payload = serde_json::from_value(value)?;
     if payload.format != "agent-system-data" {
         return Err(AppError::validation("远端文件格式不受支持。"));
+    }
+    if version < 6 {
+        rules::ensure_ideas(&mut payload.records, true);
     }
     rules::validate(&payload.records)?;
     Ok(payload.records)

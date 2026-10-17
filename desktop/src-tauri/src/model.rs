@@ -11,10 +11,18 @@ pub struct Project {
     pub status: String,
     pub priority: String,
     pub mode: String,
+    pub category: String,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StageKind {
+    Standard,
+    Ideas,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Milestone {
+    pub stage_kind: StageKind,
     pub project_id: String,
     pub name: String,
     pub acceptance: String,
