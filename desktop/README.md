@@ -39,6 +39,8 @@ npm run desktop
 
 ## 检查与构建
 
+日常交付默认完成代码修改、必要检查和 GitHub 推送，不自动生成安装包。只有用户明确提出打包要求时，才运行 `npm run bundle` 及安装验证；开发运行、前端构建和 Rust 检查不受影响。
+
 ```powershell
 npm run build
 npm test
@@ -47,6 +49,7 @@ npm run test:e2e
 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
 cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
 cargo check --manifest-path src-tauri/Cargo.toml
+# 仅在用户明确要求生成安装包时执行
 npm run bundle
 ```
 
