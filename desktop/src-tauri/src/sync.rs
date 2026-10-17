@@ -389,13 +389,31 @@ pub struct SyncService {
 impl SyncService {
     pub fn new(db: Database, directory: PathBuf) -> Result<Self> {
         let path = directory.join("sync-settings.json");
+        let mut message = "尚未检查远端".to_string();
         let settings = if path.exists() {
-            serde_json::from_slice::<SyncSettings>(&std::fs::read(path)?)
-                .map_err(|_| AppError::validation("新版同步设置损坏，请修复后重启。"))?
+            match std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<SyncSettings>(&bytes).ok())
+            {
+                Some(settings) => settings,
+                None => {
+                    message = "本机同步设置无法读取，自动同步已关闭；请重新设置。".into();
+                    SyncSettings {
+                        auto_sync: false,
+                        check_on_start: false,
+                    }
+                }
+            }
         } else {
             SyncSettings::default()
         };
-        let token = crate::platform::load_token(&directory.join("sync-token.dpapi"))?;
+        let token = match crate::platform::load_token(&directory.join("sync-token.dpapi")) {
+            Ok(token) => token,
+            Err(_) => {
+                message = "本机 Token 无法解密，请重新配置。".into();
+                String::new()
+            }
+        };
         Ok(Self {
             db,
             directory,
@@ -403,7 +421,7 @@ impl SyncService {
                 status: SyncStatus {
                     busy: false,
                     pending: 0,
-                    message: "尚未检查远端".into(),
+                    message,
                     synced_at: None,
                     conflicts: vec![],
                     settings,
@@ -451,6 +469,9 @@ impl SyncService {
         remember: bool,
         forget: bool,
     ) -> Result<SyncStatus> {
+        if let Some(value) = token.as_ref().filter(|value| !value.is_empty()) {
+            let _ = GitHub::new(value.clone())?;
+        }
         let settings_path = self.directory.join("sync-settings.json");
         let temporary = settings_path.with_extension("tmp");
         std::fs::write(&temporary, serde_json::to_vec_pretty(&settings)?)?;
@@ -507,7 +528,7 @@ impl SyncService {
                 s.status.message = e.message.clone();
                 s.failures += 1;
                 s.retry_at = Instant::now()
-                    + Duration::from_secs((30u64 * (1u64 << s.failures.min(4))).min(300));
+                    + Duration::from_secs((30u64 * (1u64 << (s.failures - 1).min(4))).min(300));
             }
         }
         result?;
@@ -517,7 +538,7 @@ impl SyncService {
         &self,
         transport: &mut dyn Transport,
         check_only: bool,
-        automatic: bool,
+        _automatic: bool,
         choices: BTreeMap<String, String>,
     ) -> Result<()> {
         let (snapshot, base) = self.db.call(|s| Ok((s.snapshot()?, s.baseline()?)))?;
@@ -559,7 +580,7 @@ impl SyncService {
                 sha,
             });
             s.status.conflicts = conflicts;
-            s.paused = automatic;
+            s.paused = true;
             s.status.message = "存在冲突，请逐条选择本机或远端版本".into();
             return Ok(());
         }

@@ -116,7 +116,7 @@ onBeforeUnmount(() => {
           app.error || app.notice
         }}</span
         ><button v-if="app.undo" class="quiet" @click="app.undoCompletion">撤销完成操作</button
-        ><span class="version">V2 · 本地优先</span>
+        ><span class="version">V2 · 0.1.0</span>
       </footer>
     </div>
     <Editor /><SyncSettings />
@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
       @positive-click="
         async () => {
           if (app.deleting && (await app.change({ type: 'delete', uid: app.deleting }))) {
-            if(app.editor?.uid===app.deleting) await app.openEditor(null)
+            if (app.editor?.uid === app.deleting) await app.openEditor(null)
             app.deleting = null
           }
         }

@@ -31,7 +31,7 @@ fn add(records: &mut Records, change: Mutation) -> String {
 }
 fn task(records: &Records, id: &str) -> Task {
     match &records[id] {
-        Record::Task(Some(t)) => t.clone(),
+        Record::Task(Some(t)) => t.as_ref().clone(),
         _ => panic!("not a task"),
     }
 }
@@ -199,8 +199,8 @@ fn completion_history_is_real_repeat_safe_and_survives_undo() {
         &mut r,
         Mutation::UndoTask {
             uid: id.clone(),
-            expected,
-            previous,
+            expected: Box::new(expected),
+            previous: Box::new(previous),
         },
     );
     assert_eq!(task(&r, &id).completions.len(), 1);
@@ -244,8 +244,8 @@ fn stale_undo_rejected() {
         &mut r,
         Mutation::UndoTask {
             uid: id,
-            expected,
-            previous
+            expected: Box::new(expected),
+            previous: Box::new(previous)
         },
         AT
     )
@@ -847,4 +847,359 @@ fn token_dpapi_roundtrip_and_clear() {
 fn v2_sync_path_is_separate() {
     assert_eq!(sync::REMOTE_PATH, "sync/v2/records.json");
     assert_ne!(sync::REMOTE_PATH, "sync/records.json");
+}
+
+#[test]
+fn two_isolated_databases_roundtrip_all_types_history_settlement_and_deletion() {
+    use agent_system::store::Database;
+    fn apply(db: &Database, m: Mutation) -> Snapshot {
+        db.call(move |s| {
+            let revision = s.revision()?;
+            s.mutate(m, revision)
+        })
+        .unwrap()
+    }
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let adb = Database::start(a.path().join("a.sqlite3")).unwrap();
+    let bdb = Database::start(b.path().join("b.sqlite3")).unwrap();
+    let aservice = SyncService::new(adb.clone(), a.path().into()).unwrap();
+    let bservice = SyncService::new(bdb.clone(), b.path().into()).unwrap();
+    let snap = apply(
+        &adb,
+        Mutation::SaveProject {
+            uid: None,
+            draft: project(),
+        },
+    );
+    let pid = snap.records.keys().next().unwrap().clone();
+    let snap = apply(
+        &adb,
+        Mutation::SaveMilestone {
+            uid: None,
+            draft: Milestone {
+                project_id: pid.clone(),
+                name: "阶段".into(),
+                acceptance: String::new(),
+                position: 1,
+                completed_at: None,
+            },
+        },
+    );
+    let mid = snap
+        .records
+        .iter()
+        .find(|(_, r)| r.kind() == "milestones")
+        .unwrap()
+        .0
+        .clone();
+    let snap = apply(
+        &adb,
+        Mutation::SaveTask {
+            uid: None,
+            draft: edit("共享事项", Some(pid.clone()), Some(mid.clone())),
+        },
+    );
+    let tid = snap
+        .records
+        .iter()
+        .find(|(_, r)| r.kind() == "tasks")
+        .unwrap()
+        .0
+        .clone();
+    apply(
+        &adb,
+        Mutation::CompleteTask {
+            uid: tid.clone(),
+            completed: true,
+        },
+    );
+    let mut j = job();
+    j.interview_at = "2026-10-20 13:00".into();
+    apply(
+        &adb,
+        Mutation::SaveJob {
+            uid: None,
+            draft: j,
+        },
+    );
+    let snap = apply(
+        &adb,
+        Mutation::SaveFinance {
+            uid: None,
+            draft: finance("待结算"),
+        },
+    );
+    let fid = snap
+        .records
+        .iter()
+        .find(|(_, r)| r.kind() == "finance_entries")
+        .unwrap()
+        .0
+        .clone();
+    apply(
+        &adb,
+        Mutation::AddNote {
+            title: "A 随笔".into(),
+        },
+    );
+    let mut remote = Fake {
+        records: Records::new(),
+        publishes: 0,
+        fail: false,
+        during_publish: None,
+    };
+    aservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    bservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    assert_eq!(
+        adb.call(|s| s.snapshot()).unwrap().records,
+        bdb.call(|s| s.snapshot()).unwrap().records
+    );
+    apply(
+        &bdb,
+        Mutation::CompleteTask {
+            uid: tid.clone(),
+            completed: false,
+        },
+    );
+    apply(
+        &bdb,
+        Mutation::Settle {
+            uid: fid.clone(),
+            day: "2026-10-17".into(),
+            amount_cents: 12000,
+        },
+    );
+    apply(
+        &bdb,
+        Mutation::AddNote {
+            title: "B 随笔".into(),
+        },
+    );
+    apply(
+        &adb,
+        Mutation::AddNote {
+            title: "A 独立新增".into(),
+        },
+    );
+    bservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    aservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    bservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    let current = adb.call(|s| s.snapshot()).unwrap().records;
+    assert_eq!(current, bdb.call(|s| s.snapshot()).unwrap().records);
+    assert_eq!(task(&current, &tid).milestone_id, Some(mid));
+    assert_eq!(task(&current, &tid).completions.len(), 1);
+    assert!(task(&current, &tid).completions[0].reopened_at.is_some());
+    assert!(
+        matches!(&current[&fid],Record::Finance(Some(f))if f.status=="已到账"&&f.amount_cents==12000)
+    );
+    apply(&adb, Mutation::Delete { uid: pid });
+    aservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    bservice
+        .execute(&mut remote, false, false, BTreeMap::new())
+        .unwrap();
+    let current = bdb.call(|s| s.snapshot()).unwrap().records;
+    assert_eq!(task(&current, &tid).project_id, None);
+    assert_eq!(task(&current, &tid).completions.len(), 1);
+    assert_eq!(task(&current, &tid).completions[0].project_id, None);
+    drop(aservice);
+    drop(bservice);
+    drop(adb);
+    drop(bdb);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+}
+
+#[test]
+fn external_connection_changes_invalidate_revision_and_stale_edit() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("test.sqlite3");
+    let mut s = Store::open(&path).unwrap();
+    let snap = s
+        .mutate(Mutation::AddNote { title: "A".into() }, 0)
+        .unwrap();
+    let uid = snap.records.keys().next().unwrap();
+    let other = rusqlite::Connection::open(&path).unwrap();
+    let changed = serde_json::to_string(&Record::Note(Some(Note {
+        title: "外部保存".into(),
+        created_at: AT.into(),
+    })))
+    .unwrap();
+    other
+        .execute(
+            "UPDATE records SET payload=? WHERE uid=?",
+            rusqlite::params![changed, uid],
+        )
+        .unwrap();
+    assert!(s.revision().unwrap() > snap.revision);
+    assert!(s
+        .mutate(Mutation::AddNote { title: "B".into() }, snap.revision)
+        .is_err());
+    assert!(
+        matches!(s.snapshot().unwrap().records.values().next().unwrap(),Record::Note(Some(n))if n.title=="外部保存")
+    );
+}
+#[test]
+fn unsupported_database_is_not_migrated_or_cleared() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("old.sqlite3");
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE old(value TEXT);INSERT INTO old VALUES('keep');PRAGMA user_version=9;",
+        )
+        .unwrap();
+    }
+    assert!(Store::open(&path).is_err());
+    let db = rusqlite::Connection::open(path).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+            .unwrap(),
+        9
+    );
+    assert_eq!(
+        db.query_row("SELECT value FROM old", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "keep"
+    );
+}
+#[test]
+fn corrupt_preferences_and_token_do_not_disable_business_storage() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("sync-settings.json"), "{bad").unwrap();
+    std::fs::write(d.path().join("sync-token.dpapi"), "not encrypted").unwrap();
+    let db = agent_system::store::Database::start(d.path().join("test.sqlite3")).unwrap();
+    let service = SyncService::new(db.clone(), d.path().into()).unwrap();
+    let status = service.status().unwrap();
+    assert!(!status.settings.auto_sync);
+    assert!(!status.settings.check_on_start);
+    assert!(!status.has_token);
+    db.call(|s| {
+        s.mutate(
+            Mutation::AddNote {
+                title: "仍可保存".into(),
+            },
+            0,
+        )
+    })
+    .unwrap();
+    drop(service);
+    drop(db);
+    std::thread::sleep(std::time::Duration::from_millis(30));
+}
+#[test]
+fn invalid_token_does_not_persist_new_preferences() {
+    let d = tempfile::tempdir().unwrap();
+    let db = agent_system::store::Database::start(d.path().join("test.sqlite3")).unwrap();
+    let service = SyncService::new(db.clone(), d.path().into()).unwrap();
+    assert!(service
+        .configure(
+            SyncSettings {
+                auto_sync: true,
+                check_on_start: true
+            },
+            Some("bad token".into()),
+            true,
+            false
+        )
+        .is_err());
+    assert!(!d.path().join("sync-settings.json").exists());
+    assert!(!service.status().unwrap().settings.auto_sync);
+    drop(service);
+    drop(db);
+    std::thread::sleep(std::time::Duration::from_millis(30));
+}
+#[test]
+fn automatic_conflicts_pause_and_cancel_never_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let db = agent_system::store::Database::start(d.path().join("test.sqlite3")).unwrap();
+    let service = SyncService::new(db.clone(), d.path().into()).unwrap();
+    let mut base = Records::new();
+    let id = add(
+        &mut base,
+        Mutation::SaveProject {
+            uid: None,
+            draft: project(),
+        },
+    );
+    let initial = base.clone();
+    db.call(move |s| s.import(&Records::new(), &initial))
+        .unwrap();
+    let id2 = id.clone();
+    db.call(move |s| {
+        let mut p = project();
+        p.goal = "本机修改".into();
+        s.mutate(
+            Mutation::SaveProject {
+                uid: Some(id2),
+                draft: p,
+            },
+            1,
+        )
+    })
+    .unwrap();
+    if let Record::Project(Some(p)) = base.get_mut(&id).unwrap() {
+        p.goal = "远端修改".into();
+    }
+    let mut fake = Fake {
+        records: base.clone(),
+        publishes: 0,
+        fail: false,
+        during_publish: None,
+    };
+    let before = db.call(|s| s.snapshot()).unwrap().records;
+    service
+        .execute(&mut fake, false, true, BTreeMap::new())
+        .unwrap();
+    assert_eq!(service.status().unwrap().conflicts.len(), 1);
+    assert_eq!(fake.publishes, 0);
+    service.cancel_conflicts();
+    assert!(service.status().unwrap().conflicts.is_empty());
+    assert_eq!(db.call(|s| s.snapshot()).unwrap().records, before);
+    assert_eq!(fake.records, base);
+    drop(service);
+    drop(db);
+    std::thread::sleep(std::time::Duration::from_millis(30));
+}
+#[test]
+fn offline_failure_preserves_unsynced_data_and_baseline() {
+    let d = tempfile::tempdir().unwrap();
+    let db = agent_system::store::Database::start(d.path().join("test.sqlite3")).unwrap();
+    let service = SyncService::new(db.clone(), d.path().into()).unwrap();
+    db.call(|s| {
+        s.mutate(
+            Mutation::AddNote {
+                title: "离线记录".into(),
+            },
+            0,
+        )
+    })
+    .unwrap();
+    let before = db.call(|s| s.snapshot()).unwrap().records;
+    let mut fake = Fake {
+        records: Records::new(),
+        publishes: 0,
+        fail: true,
+        during_publish: None,
+    };
+    assert!(service
+        .execute(&mut fake, false, true, BTreeMap::new())
+        .is_err());
+    assert_eq!(db.call(|s| s.snapshot()).unwrap().records, before);
+    assert!(db.call(|s| s.baseline()).unwrap().is_empty());
+    assert_eq!(fake.publishes, 0);
+    drop(service);
+    drop(db);
+    std::thread::sleep(std::time::Duration::from_millis(30));
 }

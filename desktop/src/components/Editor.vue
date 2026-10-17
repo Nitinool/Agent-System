@@ -215,18 +215,18 @@ const jobPreview = computed(() =>
           ><label>项目目标<textarea v-model="f.goal" /></label>
           <div class="two">
             <label
-              >优先级<select v-model="f.priority">
+              >优先级<select v-model="f.priority" aria-label="优先级">
                 <option v-for="p in priorities">{{ p }}</option>
               </select></label
             ><label
-              >类型<select v-model="f.mode">
+              >类型<select v-model="f.mode" aria-label="类型">
                 <option>目标型</option>
                 <option>探索型</option>
               </select></label
             >
           </div>
           <label
-            >分组<select v-model="f.status">
+            >分组<select v-model="f.status" aria-label="分组">
               <option value="进行中">Active</option>
               <option value="暂停">Planning</option>
               <option value="已完成">Archive</option>
@@ -245,12 +245,12 @@ const jobPreview = computed(() =>
             /></label>
           </div>
           <label
-            >所属项目<select v-model="f.project_id">
+            >所属项目<select v-model="f.project_id" aria-label="所属项目">
               <option value="">无项目</option>
               <option v-for="p in app.projects" :value="p.uid">{{ p.data.name }}</option>
             </select></label
           ><label
-            >分类<select v-model="f.category">
+            >分类<select v-model="f.category" aria-label="分类">
               <option v-for="c in categories">{{ c }}</option>
             </select></label
           ><label>备注<textarea v-model="f.notes" rows="8" /></label
@@ -274,7 +274,7 @@ const jobPreview = computed(() =>
           <div class="two">
             <label>投递日期<input v-model="f.applied_on" type="date" required /></label
             ><label
-              >进度<select v-model="f.status">
+              >进度<select v-model="f.status" aria-label="进度">
                 <option v-for="s in jobStatuses">{{ s }}</option>
               </select></label
             >
@@ -295,6 +295,7 @@ const jobPreview = computed(() =>
           ><div class="two">
             <label
               >方向<select
+                aria-label="方向"
                 v-model="f.direction"
                 @change="f.status = f.direction === '支出' ? '已支付' : '已到账'"
               >
@@ -336,7 +337,7 @@ const jobPreview = computed(() =>
               :value="s"
             /></datalist
           ><label v-if="f.direction === '收入'"
-            >到账状态<select v-model="f.status">
+            >到账状态<select v-model="f.status" aria-label="到账状态">
               <option>已到账</option>
               <option>待结算</option>
             </select></label

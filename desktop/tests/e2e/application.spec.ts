@@ -1,4 +1,106 @@
 import { test, expect } from '@playwright/test'
+
+test('financial editor submits integer cents and retains failed drafts', async ({ page }) => {
+  await page.goto('/#/finance')
+  await page.getByRole('button', { name: '记一笔', exact: false }).click()
+  await page.getByLabel('方向', { exact: true }).selectOption('收入')
+  await page.getByLabel('金额（元）', { exact: true }).fill('128.50')
+  await page.getByLabel('名称', { exact: true }).fill('待结算测试')
+  await page.getByLabel('副业来源', { exact: true }).fill('测试来源')
+  await page.getByLabel('到账状态', { exact: true }).selectOption('待结算')
+  await page.evaluate(() => (window as any).__TEST_FAIL__())
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByLabel('金额（元）', { exact: true })).toHaveValue('128.50')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('#entity-editor')).toHaveCount(0)
+  const snapshot = await page.evaluate(() => (window as any).__TEST_BRIDGE__('snapshot', {}))
+  expect((Object.values(snapshot.records)[0] as any).fields.amount_cents).toBe(12850)
+  expect((Object.values(snapshot.records)[0] as any).fields.settled_on).toBeNull()
+})
+
+test('1500 tasks and 150 today rows stay virtualized with stable navigation', async ({ page }) => {
+  const day = new Date().toLocaleDateString('sv-SE'),
+    projectId = 'f'.repeat(32)
+  const fixture: Record<string, unknown> = {
+    [projectId]: {
+      kind: 'projects',
+      fields: {
+        name: '重构项目',
+        goal: '让每日行动清晰可见',
+        status: '进行中',
+        priority: '高',
+        mode: '目标型',
+      },
+    },
+  }
+  for (let i = 1; i <= 1500; i++)
+    fixture[i.toString(16).padStart(32, '0')] = {
+      kind: 'tasks',
+      fields: {
+        title: `事项 ${i}`,
+        planned_on: i <= 150 ? day : null,
+        range_start: i <= 150 ? day : null,
+        range_end: i <= 150 ? day : null,
+        category: '开发',
+        notes: '',
+        status: '待开始',
+        priority: '普通',
+        kind: '任务',
+        project_id: projectId,
+        milestone_id: null,
+        resume_status: '待开始',
+        acceptance: '',
+        outcome: '',
+        completed_at: null,
+        days: [],
+        excluded_days: [],
+        completions: [],
+      },
+    }
+  for (let i = 1501; i <= 1505; i++)
+    fixture[i.toString(16).padStart(32, '0')] = {
+      kind: 'notes',
+      fields: {
+        title: [
+          '完成项目布局讨论',
+          '今天先处理最重要的事项',
+          '记录真实进展',
+          '保持页面紧凑',
+          '下一步验证双机同步',
+        ][i - 1501],
+        created_at: new Date().toISOString(),
+      },
+    }
+  await page.addInitScript((records) => {
+    ;(window as any).__TEST_INITIAL_RECORDS__ = records
+  }, fixture)
+  const start = Date.now()
+  await page.goto('/')
+  await expect(page.getByText('事项 1', { exact: true })).toBeVisible()
+  const startupMs = Date.now() - start,
+    rendered = await page.locator('.task-row').count()
+  expect(rendered).toBeLessThan(50)
+  await page.screenshot({ path: 'test-results/workbench-1440.png' })
+  const navStart = Date.now()
+  for (let i = 0; i < 5; i++)
+    await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  console.log(
+    JSON.stringify({
+      fixtureTasks: 1500,
+      todayTasks: 150,
+      renderedRows: rendered,
+      browserStartupMs: startupMs,
+      repeatedHomeMs: Date.now() - navStart,
+    }),
+  )
+  await page.getByTitle('显示或隐藏金额').click()
+  await page.getByRole('navigation').getByRole('link', { name: '项目', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await expect(page.getByText('••••')).toHaveCount(0)
+  await page.setViewportSize({ width: 1100, height: 700 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: 'test-results/workbench-1100.png' })
+})
 // This bridge exists only in the test browser; the desktop never seeds production data.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -20,7 +122,15 @@ test.beforeEach(async ({ page }) => {
       fail = true
     }
     ;(window as any).__TEST_BRIDGE__ = async (command: string, args: any) => {
-      if (command === 'snapshot') return { revision, records, local_ids: ids }
+      if (command === 'snapshot') {
+        if ((window as any).__TEST_INITIAL_RECORDS__) {
+          records = (window as any).__TEST_INITIAL_RECORDS__
+          delete (window as any).__TEST_INITIAL_RECORDS__
+          for (const id of Object.keys(records)) ids[id] = ++local
+          revision++
+        }
+        return { revision, records, local_ids: ids }
+      }
       if (command === 'capture_status') return { running: false, message: '已暂停', exclusions: '' }
       if (command === 'sync_status') return status
       if (command === 'segments') return []
@@ -41,6 +151,8 @@ test.beforeEach(async ({ page }) => {
           }
         }
         if (m.type === 'save_project') records[id] = { kind: 'projects', fields: m.draft }
+        if (m.type === 'save_finance') records[id] = { kind: 'finance_entries', fields: m.draft }
+        if (m.type === 'save_job') records[id] = { kind: 'job_applications', fields: m.draft }
         if (m.type === 'save_task') {
           if (m.draft.end && !m.draft.start) throw { message: '请先填写开始日期' }
           records[id] = {
@@ -121,6 +233,67 @@ test('project drawer save and failed task editor remains intact', async ({ page 
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByLabel('事项名称')).toHaveValue('测试事项')
   await expect(page.locator('#entity-editor').getByRole('alert')).toContainText('模拟磁盘写入失败')
+})
+
+test('project search keeps true stage progress and scheduling selects task identity', async ({
+  page,
+}) => {
+  const project = 'a'.repeat(32),
+    other = 'b'.repeat(32),
+    stage = 'c'.repeat(32)
+  const first = 'd'.repeat(32),
+    second = 'e'.repeat(32)
+  const projectFields = { goal: '', status: '进行中', priority: '普通', mode: '目标型' }
+  const taskFields = {
+    planned_on: null,
+    range_start: null,
+    range_end: null,
+    category: '其他',
+    notes: '',
+    status: '待开始',
+    priority: '普通',
+    kind: '任务',
+    project_id: project,
+    milestone_id: stage,
+    resume_status: '待开始',
+    acceptance: '',
+    outcome: '',
+    completed_at: null,
+    days: [],
+    excluded_days: [],
+    completions: [],
+  }
+  await page.addInitScript(
+    (records) => {
+      ;(window as any).__TEST_INITIAL_RECORDS__ = records
+    },
+    {
+      [project]: { kind: 'projects', fields: { ...projectFields, name: '当前项目' } },
+      [other]: { kind: 'projects', fields: { ...projectFields, name: '另一个项目' } },
+      [stage]: {
+        kind: 'milestones',
+        fields: {
+          project_id: project,
+          name: '第一阶段',
+          position: 0,
+          goal: '',
+          acceptance: '',
+          verified_at: null,
+        },
+      },
+      [first]: { kind: 'tasks', fields: { ...taskFields, title: '事项' } },
+      [second]: { kind: 'tasks', fields: { ...taskFields, title: '事项延长' } },
+    },
+  )
+  await page.goto('/#/projects?id=' + project)
+  await expect(page.locator('.stage summary')).toContainText('0 / 2')
+  await page.getByLabel('搜索项目事项').fill('延长')
+  await expect(page.locator('.task-row')).toHaveCount(1)
+  await expect(page.locator('.stage summary')).toContainText('0 / 2')
+  await page.locator('.task-row').dispatchEvent('click')
+  await expect(page.getByLabel('安排的事项')).toHaveValue(second)
+  await page.getByRole('button', { name: /另一个项目/ }).click()
+  await expect(page.getByLabel('安排的事项')).toHaveValue('')
 })
 for (const scale of [1.25, 1.5])
   test(`layout at 1100x700 and ${scale * 100}% scale`, async ({ browser }) => {

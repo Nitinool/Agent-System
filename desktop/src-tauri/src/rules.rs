@@ -393,7 +393,7 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
             uid = id.unwrap_or(uid);
             check_existing(records, &uid, "tasks")?;
             let mut task = match records.get(&uid) {
-                Some(Record::Task(Some(t))) => t.clone(),
+                Some(Record::Task(Some(t))) => t.as_ref().clone(),
                 _ => Task::default(),
             };
             if task.project_id != draft.project_id {
@@ -414,7 +414,7 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
             task.planned_on = draft.start.clone();
             task.range_start = draft.start;
             task.range_end = end;
-            records.insert(uid.clone(), Record::Task(Some(task)));
+            records.insert(uid.clone(), Record::Task(Some(Box::new(task))));
         }
         Mutation::CompleteTask { uid: id, completed } => {
             uid = id;
@@ -446,7 +446,7 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
         } => {
             uid = id;
             let t = task_mut(records, &uid)?;
-            ensure(*t == expected, "事项已被修改，无法撤销旧操作。")?;
+            ensure(*t == *expected, "事项已被修改，无法撤销旧操作。")?;
             // Undo reopens the task but retains the real completion history.
             if t.status == "已完成" && previous.status != "已完成" {
                 t.status = previous.status;

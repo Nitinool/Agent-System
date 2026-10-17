@@ -3,6 +3,7 @@ use crate::{model::*, rules};
 use chrono::Local;
 use rusqlite::{params, Connection};
 use std::{
+    cell::Cell,
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::mpsc,
@@ -20,6 +21,8 @@ PRAGMA user_version=1;";
 pub struct Store {
     pub db: Connection,
     pub path: PathBuf,
+    external_version: Cell<u32>,
+    external_revision: Cell<u32>,
 }
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -47,20 +50,30 @@ impl Store {
         }
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
         db.execute("UPDATE segments SET end=last_seen,status='interrupted',reason='上次异常退出，仅保留已采样时长' WHERE status='running'", [])?;
+        let external_version = db.query_row("PRAGMA data_version", [], |r| r.get(0))?;
         Ok(Self {
             db,
             path: path.into(),
+            external_version: Cell::new(external_version),
+            external_revision: Cell::new(0),
         })
     }
     pub fn revision(&self) -> Result<u32> {
+        let external: u32 = self.db.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+        if self.external_version.replace(external) != external {
+            self.external_revision
+                .set(self.external_revision.get().wrapping_add(1));
+        }
         Ok(self
             .db
             .query_row("SELECT value FROM state WHERE key='revision'", [], |r| {
                 let s: String = r.get(0)?;
-                Ok(s.parse().unwrap_or(0))
-            })?)
+                s.parse::<u32>().map_err(|_| rusqlite::Error::InvalidQuery)
+            })?
+            .wrapping_add(self.external_revision.get()))
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
+        let _read = self.db.unchecked_transaction()?;
         let mut rows = self
             .db
             .prepare("SELECT uid,local_id,payload FROM records ORDER BY local_id")?;
@@ -207,6 +220,14 @@ impl Store {
         for row in rows {
             let mut segment = row?;
             if let Some(d) = day {
+                let end = chrono::DateTime::parse_from_rfc3339(&segment.last_seen)
+                    .map_err(|_| AppError::validation("记录时间无效。"))?;
+                if segment.start.get(..10).is_some_and(|start| start < d)
+                    && end.date_naive() == rules::day(d)?
+                    && end.time() == chrono::NaiveTime::MIN
+                {
+                    continue;
+                }
                 crate::capture::clip(&mut segment, d)?;
             }
             result.push(segment);

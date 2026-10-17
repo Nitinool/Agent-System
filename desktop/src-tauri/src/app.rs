@@ -56,11 +56,23 @@ impl CaptureService {
                     }
                     if state.running && Instant::now() >= next {
                         next = Instant::now() + Duration::from_secs(1);
-                    #[cfg(feature="verification")]
-                    let fixed = std::env::args().any(|s|s=="--fixed-reader");
-                    #[cfg(not(feature="verification"))]
-                    let fixed = false;
-                    let (activity, locked) = if fixed {(Some(crate::capture::Activity{pid:99999,process:"fixture.exe".into(),title:"固定测试窗口".into(),own:false}),Some(false))}else{crate::platform::observation()};
+                        #[cfg(feature = "verification")]
+                        let fixed = std::env::args().any(|s| s == "--fixed-reader");
+                        #[cfg(not(feature = "verification"))]
+                        let fixed = false;
+                        let (activity, locked) = if fixed {
+                            (
+                                Some(crate::capture::Activity {
+                                    pid: 99999,
+                                    process: "fixture.exe".into(),
+                                    title: "固定测试窗口".into(),
+                                    own: false,
+                                }),
+                                Some(false),
+                            )
+                        } else {
+                            crate::platform::observation()
+                        };
                         let excluded: Vec<_> = state
                             .exclusions
                             .replace('，', ",")

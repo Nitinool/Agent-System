@@ -35,6 +35,7 @@ npm test
 npx playwright install chromium
 npm run test:e2e
 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
 cargo check --manifest-path src-tauri/Cargo.toml
 npm run bundle
 ```
@@ -45,8 +46,12 @@ Rust 的 `model.rs` 是前后端契约来源；执行 `npm run types` 再检查�
 
 只在显式 `verification` 功能构建中允许 `--verify-profile <绝对路径>` 指定隔离验证目录；正式安装包不启用该功能。模拟桥接只能用于 Vite 开发模式，生产包无浏览器数据替代或演示初始化。测试使用临时目录，禁止指向真实用户数据。
 
+原生集成检查可对已安装的正式 EXE 执行：`npm run test:native -- "C:\测试安装目录\agent-system.exe"`。脚本仅为子进程指定临时 LOCALAPPDATA / WebView2 目录，通过实际 WebView2 与 Tauri IPC 验证保存、撤销、结算、加密凭据和重启；不导入模拟桥接、不开始真实采集、不使用有效 Token。未传 EXE 时需先 `npm run build:verify`，使用固定读取器验证构建；该测试模式不进入正式安装包。若系统应用控制阻止测试 EXE，保留策略，通过正常安装版验证，不修改系统安全设置。
+
+核心性能样本：`cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --example performance`，只使用临时数据库。浏览器界面测试使用隔离的 1,500 个事项 / 150 条今日待办样本，不能把其耗时当作正式桌面性能。`src/bindings/` 由 Rust 生成，其余前端源码使用 Prettier，Rust 使用 rustfmt；依赖、构建产物、测试数据库和截图均不提交。
+
 Windows 用户目录含单引号时，当前 tauri-winres 会错误转义 RC 图标路径。`build.rs` 仅把公开应用图标复制到 `%PUBLIC%/Agent-System-build/<工程路径哈希>/` 后编译，源代码与业务数据不搬动。
 
 ## 验收状态
 
-各轮实际结果和未完成环境验证以仓库根目录开发交接文档为准。尚未完成验证的安装、真实双机、锁屏 / 睡眠等场景，不因模拟测试通过而视为已验收。
+六页、持久化、原生业务流程及当前机器上的安装 / 覆盖升级 / 卸载保留数据已验证。各轮实际结果和未完成环境验证以仓库根目录开发交接文档为准。真实双机同步、硬件锁屏 / 睡眠、干净 Windows 机器和系统级 DPI 尚需补验，不因模拟测试通过而视为已验收。

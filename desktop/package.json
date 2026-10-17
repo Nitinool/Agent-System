@@ -11,6 +11,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "build:verify": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml --features verification,custom-protocol",
+    "test:native": "node tests/native-smoke.mjs",
     "tauri": "tauri",
     "desktop": "tauri dev",
     "bundle": "tauri build --bundles nsis",

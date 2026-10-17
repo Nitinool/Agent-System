@@ -8,6 +8,7 @@ const props = withDefaults(
   { height: 320 },
 )
 const app = useApp()
+const emit = defineEmits<{ select: [item: Row<'tasks'>] }>()
 const items = computed(() => props.items.map((t) => ({ ...t, key: t.uid })))
 const projectCode = (id: string | null) => (id ? `#${id.slice(0, 8).toUpperCase()}` : '')
 </script>
@@ -23,6 +24,7 @@ const projectCode = (id: string | null) => (id ? `#${id.slice(0, 8).toUpperCase(
     <template #default="{ item }"
       ><div
         class="task-row"
+        @click="emit('select', item)"
         :class="{ done: item.data.status === '已完成' }"
         :style="{
           '--task-color': colors[((app.snapshot.local_ids[item.uid] ?? 1) - 1) % colors.length],

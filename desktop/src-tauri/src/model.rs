@@ -109,14 +109,14 @@ pub struct Finance {
     pub notes: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[serde(tag = "kind", content = "fields")]
+#[serde(tag = "kind", content = "fields", deny_unknown_fields)]
 pub enum Record {
     #[serde(rename = "projects")]
     Project(Option<Project>),
     #[serde(rename = "milestones")]
     Milestone(Option<Milestone>),
     #[serde(rename = "tasks")]
-    Task(Option<Task>),
+    Task(Option<Box<Task>>),
     #[serde(rename = "notes")]
     Note(Option<Note>),
     #[serde(rename = "job_applications")]
@@ -188,8 +188,8 @@ pub enum Mutation {
     },
     UndoTask {
         uid: String,
-        expected: Task,
-        previous: Task,
+        expected: Box<Task>,
+        previous: Box<Task>,
     },
     ArrangeTask {
         uid: String,

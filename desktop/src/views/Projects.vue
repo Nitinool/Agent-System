@@ -22,7 +22,7 @@ watch(
   { immediate: true },
 )
 const project = computed(() => app.projects.find((p) => p.uid === selected.value)),
-  projectItems = computed(() => app.tasks.filter(t=>t.data.project_id===selected.value)),
+  projectItems = computed(() => app.tasks.filter((t) => t.data.project_id === selected.value)),
   items = computed(() =>
     projectItems.value.filter(
       (t) =>
@@ -31,6 +31,9 @@ const project = computed(() => app.projects.find((p) => p.uid === selected.value
     ),
   ),
   stages = computed(() => app.stages.filter((s) => s.data.project_id === selected.value))
+watch(selected, () => {
+  taskId.value = ''
+})
 const active = computed(() => items.value.filter((t) => t.data.status !== '已完成')),
   done = computed(() => items.value.filter((t) => t.data.status === '已完成')),
   future = computed(() =>
@@ -45,7 +48,13 @@ const active = computed(() => items.value.filter((t) => t.data.status !== '已�
       .sort((a, b) => b.completed_at.localeCompare(a.completed_at)),
   )
 const percent = computed(() =>
-  projectItems.value.length ? Math.round((projectItems.value.filter(t=>t.data.status==='已完成').length / projectItems.value.length) * 100) : 0,
+  projectItems.value.length
+    ? Math.round(
+        (projectItems.value.filter((t) => t.data.status === '已完成').length /
+          projectItems.value.length) *
+          100,
+      )
+    : 0,
 )
 function chooseTask(row: Row<'tasks'>) {
   taskId.value = row.uid
@@ -129,8 +138,8 @@ function period(mode: string) {
           </div>
           <small>{{
             project.data.mode === '目标型'
-              ? `${percent}% · ${done.length}/${items.length} 完成`
-              : `累计 ${events.length} 次完成 · 当前完成 ${done.length} 项`
+              ? `${percent}% · ${projectItems.filter((t) => t.data.status === '已完成').length}/${projectItems.length} 完成`
+              : `累计 ${events.length} 次完成 · 当前完成 ${projectItems.filter((t) => t.data.status === '已完成').length} 项`
           }}</small>
         </div>
         <div class="toolbar">
@@ -151,10 +160,11 @@ function period(mode: string) {
               <span>{{ s.data.name }}</span
               ><small class="muted"
                 >{{
-                  items.filter((t) => t.data.milestone_id === s.uid && t.data.status === '已完成')
-                    .length
+                  projectItems.filter(
+                    (t) => t.data.milestone_id === s.uid && t.data.status === '已完成',
+                  ).length
                 }}
-                / {{ items.filter((t) => t.data.milestone_id === s.uid).length }}</small
+                / {{ projectItems.filter((t) => t.data.milestone_id === s.uid).length }}</small
               ><button
                 class="quiet"
                 @click.prevent="app.openEditor({ kind: 'tasks', project: selected, stage: s.uid })"
@@ -167,44 +177,44 @@ function period(mode: string) {
                 编辑</button
               ><button class="quiet" @click.prevent="app.deleting = s.uid">删除</button>
             </summary>
-            <div
-              @click="
-                (e) => {
-                  const row = (e.target as HTMLElement).closest('.task-row')
-                  if (row) {
-                    const title = row.querySelector('.task-title')?.textContent
-                    const t = items.find((t) => title?.includes(t.data.title))
-                    if (t) chooseTask(t)
-                  }
-                }
+            <TaskList
+              @select="chooseTask"
+              :items="active.filter((t) => t.data.milestone_id === s.uid)"
+              :height="
+                Math.min(
+                  280,
+                  Math.max(44, active.filter((t) => t.data.milestone_id === s.uid).length * 44),
+                )
               "
-            >
-              <TaskList
-                :items="active.filter((t) => t.data.milestone_id === s.uid)"
-                :height="
-                  Math.min(
-                    280,
-                    Math.max(44, active.filter((t) => t.data.milestone_id === s.uid).length * 44),
-                  )
-                "
-              />
-            </div>
+            />
           </details>
           <section v-if="unstaged.length" class="panel">
             <div class="panel-head"><h2>未分阶段</h2></div>
-            <TaskList :items="unstaged" :height="Math.min(240, unstaged.length * 44)" />
+            <TaskList
+              @select="chooseTask"
+              :items="unstaged"
+              :height="Math.min(240, unstaged.length * 44)"
+            />
           </section>
           <details class="panel" :open="false">
             <summary>
               未来想法 <small class="muted">{{ future.length }}</small>
             </summary>
-            <TaskList :items="future" :height="Math.min(240, Math.max(44, future.length * 44))" />
+            <TaskList
+              @select="chooseTask"
+              :items="future"
+              :height="Math.min(240, Math.max(44, future.length * 44))"
+            />
           </details>
           <details class="panel">
             <summary>
               已完成事项 <small class="muted">{{ done.length }}</small>
             </summary>
-            <TaskList :items="done" :height="Math.min(240, Math.max(44, done.length * 44))" />
+            <TaskList
+              @select="chooseTask"
+              :items="done"
+              :height="Math.min(240, Math.max(44, done.length * 44))"
+            />
           </details>
           <details class="panel">
             <summary>

@@ -9,7 +9,12 @@ import type { Segment } from '../bindings/Segment'
 import TaskList from '../components/TaskList.vue'
 import TimeChart from '../components/TimeChart.vue'
 const app = useApp(),
-  showMoney = computed({get:()=>app.financialVisible,set:(value:boolean)=>{app.financialVisible=value}}),
+  showMoney = computed({
+    get: () => app.financialVisible,
+    set: (value: boolean) => {
+      app.financialVisible = value
+    },
+  }),
   hideDone = ref(false),
   quick = ref(''),
   note = ref<{ title: string; created_at: string } | null>(null),
@@ -123,7 +128,7 @@ onBeforeUnmount(() => {
         <NVirtualList
           v-else
           :items="app.notes.map((n) => ({ ...n, key: n.uid }))"
-          :item-size="52"
+          :item-size="36"
           :style="{ height: '330px' }"
           key-field="uid"
           ><template #default="{ item }"
@@ -293,10 +298,10 @@ onBeforeUnmount(() => {
 }
 .note-row {
   width: 100%;
-  height: 52px;
+  height: 36px;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   border: 0;
   border-bottom: 1px solid #f0f2f6;
@@ -306,12 +311,15 @@ onBeforeUnmount(() => {
 .note-row time {
   color: #91a0b2;
   font-size: 10px;
+  flex-shrink: 0;
+  width: 76px;
 }
 .note-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
 }
 .home-right {

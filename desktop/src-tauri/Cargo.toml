@@ -26,16 +26,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "system-proxy"] }
 uuid = { version = "1", features = ["v4"] }
-ts-rs = { version = "11", features = ["serde-json-impl"] }
+ts-rs = { version = "11", features = ["serde-json-impl", "no-serde-warnings"] }
 base64 = "0.22"
 tauri = { version = "2", optional = true, features = [] }
 tauri-plugin-single-instance = { version = "2", optional = true }
 rfd = { version = "0.15", optional = true }
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_RemoteDesktop", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Diagnostics_ToolHelp", "Win32_Security"] }
 
 [dev-dependencies]
 tempfile = "3"

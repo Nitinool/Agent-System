@@ -311,7 +311,7 @@ select:focus {
   width: 100%;
 }
 .chart-empty {
-  height: 200px;
+  height: 100px;
   display: grid;
   place-content: center;
 }
