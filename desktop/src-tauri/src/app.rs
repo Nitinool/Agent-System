@@ -309,11 +309,7 @@ fn directory() -> Result<PathBuf> {
             return Ok(path);
         }
     }
-    Ok(PathBuf::from(
-        std::env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| AppError::new("directory", "无法确定本机数据目录。"))?,
-    )
-    .join("Agent-System-V2"))
+    crate::platform::data_directory()
 }
 pub fn run() {
     let result = tauri::Builder::default()
@@ -387,8 +383,14 @@ pub fn run() {
                 }
             }
         }),
-        Err(_) => {
-            rfd::MessageDialog::new().set_title("Agent System 启动失败").set_description("新版无法启动，请检查本机数据目录权限、数据库或 WebView2 环境。旧版数据未被修改。").set_level(rfd::MessageLevel::Error).show();
+        Err(error) => {
+            rfd::MessageDialog::new()
+                .set_title("Agent System 启动失败")
+                .set_description(format!(
+                    "{error}\n请检查数据目录或启动环境。旧版数据未被修改。"
+                ))
+                .set_level(rfd::MessageLevel::Error)
+                .show();
         }
     }
 }

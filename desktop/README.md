@@ -27,6 +27,8 @@ C++ 编译环境需安装完整的 Visual Studio 2022 Build Tools，包含“C++
 
 正式数据保存到 `%LOCALAPPDATA%/Agent-System-V2/`，包含 `activity.sqlite3`、`backups/`、`sync-settings.json` 和 DPAPI 加密的 `sync-token.dpapi`。当前数据库版本 2，版本 1 在启动时先完整备份到 `backups/before-upgrade-v1-v2-*.sqlite3`，再事务升级；失败整体回滚。保留既有事项分类、求职及其他业务数据，旧 V2 0.1 构建不能打开升级后的数据库。SQLite 工作线程维护记录、删除标记与同步基线，完成历史及日期关联与事项一起同步。
 
+从 MSIX 打包的开发助手启动子进程时，Windows 可能把同一个 AppData 路径重定向到该助手的私有 LocalCache，造成“助手启动有数据、双击脚本为空”。新版在打开数据库前校验物理目录，拒绝隔离缓存中的资料目录并显示具体启动错误，不自动搬移数据。首次优先从文件资源管理器双击根目录脚本。若此前已有隔离副本，应先关闭程序并完整备份两份数据库，再恢复到正常目录；两边都有记录时必须核对合并，不能直接覆盖。Windows 行为说明见 [Microsoft MSIX 文档](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)。
+
 新版从空数据开始，不扫描、导入或删除旧版数据库。旧版的 `data/`、启动入口和 `sync/records.json` 不变。新版同步固定使用私有仓库 `Nitinool/Agent-System-data` 中的 **`sync/v2/records.json`**；不要把旧文件复制到新版路径。
 
 两台电脑都运行新版后，在侧栏“数据同步”各自配置 Fine-grained Token，仅授权数据仓库的 Contents Read and write。默认手动同步、启动仅检查；需点击“立即同步”才能合并。自动同步需在两台机器分别开启。关闭编辑抽屉并保存输入后再同步；冲突逐条选择或取消，失败保留本机内容，导入前自动备份。行为日志不上传。Token 只在输入框短暂出现，不放入 Pinia、数据库或同步文件；保存凭据由 Rust 调用 Windows DPAPI。

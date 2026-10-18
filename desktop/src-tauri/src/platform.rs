@@ -1,6 +1,92 @@
 //! Narrow Windows adapter. Raw handles never leave this module.
 use crate::{capture::Activity, model::*};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub fn data_directory() -> Result<PathBuf> {
+    let root = std::env::var_os("LOCALAPPDATA")
+        .ok_or_else(|| AppError::new("directory", "无法确定本机数据目录。"))?;
+    checked_data_directory(Path::new(&root))
+}
+
+fn checked_data_directory(root: &Path) -> Result<PathBuf> {
+    let directory = root.join("Agent-System-V2");
+    // MSIX hosts can redirect an identical-looking AppData path into their
+    // private cache. Check the physical path before creating/opening a database.
+    let existing = if directory.exists() { &directory } else { root };
+    let physical = std::fs::canonicalize(existing)?;
+    if is_package_cache(&physical) {
+        return Err(AppError::new(
+            "directory_redirected",
+            "当前启动环境把数据目录重定向到了其他应用的隔离缓存。请关闭后在文件资源管理器中双击“启动桌面新版.cmd”。未创建或改写数据库；若已有隔离数据，请先备份并恢复到正常目录。",
+        ));
+    }
+    Ok(directory)
+}
+
+fn is_package_cache(path: &Path) -> bool {
+    let parts: Vec<_> = path
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+    parts
+        .windows(4)
+        .any(|parts| parts[0] == "packages" && parts[2] == "localcache" && parts[3] == "local")
+}
+
+#[cfg(test)]
+mod data_directory_tests {
+    use super::*;
+
+    fn temporary_profile_root() -> tempfile::TempDir {
+        // Keep these fixtures outside AppData virtualization even when Cargo
+        // itself was launched by an MSIX-packaged development host.
+        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        tempfile::tempdir_in(target).unwrap()
+    }
+
+    #[test]
+    fn distinguishes_package_cache_from_regular_and_redirected_user_folders() {
+        assert!(is_package_cache(Path::new(
+            "C:/Users/test/AppData/Local/Packages/Host_123/LocalCache/Local/Agent-System-V2"
+        )));
+        assert!(is_package_cache(Path::new(
+            "C:/Users/test/AppData/Local/PACKAGES/Host_123/LOCALCACHE/LOCAL"
+        )));
+        assert!(!is_package_cache(Path::new(
+            "C:/Users/test/AppData/Local/Agent-System-V2"
+        )));
+        assert!(!is_package_cache(Path::new("D:/UserData/Agent-System-V2")));
+    }
+
+    #[test]
+    fn refuses_isolated_existing_profile_or_first_launch_without_creating_data() {
+        let temp = temporary_profile_root();
+        let root = temp.path().join("Packages/Host_123/LocalCache/Local");
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(checked_data_directory(&root).is_err());
+        let directory = root.join("Agent-System-V2");
+        assert!(!directory.exists());
+        std::fs::create_dir(&directory).unwrap();
+        let sentinel = directory.join("preserve.txt");
+        std::fs::write(&sentinel, "existing data").unwrap();
+        assert!(checked_data_directory(&root).is_err());
+        assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "existing data");
+    }
+
+    #[test]
+    fn allows_regular_profile_without_initializing_or_replacing_files() {
+        let temp = temporary_profile_root();
+        let directory = temp.path().join("Agent-System-V2");
+        assert_eq!(checked_data_directory(temp.path()).unwrap(), directory);
+        assert!(!directory.exists());
+        std::fs::create_dir(&directory).unwrap();
+        let sentinel = directory.join("preserve.txt");
+        std::fs::write(&sentinel, "existing data").unwrap();
+        assert_eq!(checked_data_directory(temp.path()).unwrap(), directory);
+        assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "existing data");
+    }
+}
 
 pub fn save_token(path: &Path, token: &str) -> Result<()> {
     if token.is_empty() {
