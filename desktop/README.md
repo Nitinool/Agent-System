@@ -17,6 +17,10 @@ npm run desktop
 
 仓库根目录 `启动桌面新版.cmd` 可协助定位本机工具链。另一台电脑需要独立安装上述开发工具；Python 旧版入口继续保留。
 
+如果启动提示“请先安装 Rust MSVC 工具链”，请先运行 [Rust 官方 Windows 安装器](https://rust-lang.org/tools/install/)，选择默认的 `x86_64-pc-windows-msvc` 工具链。安装完成后在本目录执行 `rustup show`，会按 `rust-toolchain.toml` 使用指定版本。Cargo 通常位于 `%USERPROFILE%\.cargo\bin\cargo.exe`，启动脚本会自动加入该目录。
+
+C++ 编译环境需安装完整的 Visual Studio 2022 Build Tools，包含“C++ 生成工具”、MSVC x64 / x86 和 Windows 11 SDK。可以运行 [VS2022 官方安装器](https://aka.ms/vs/17/release/vs_BuildTools.exe)；安装需要 Windows 管理员确认。仅存在 Visual Studio Installer 或安装被中途取消，不表示编译工具已就绪。首次启动还会下载并编译 Rust 依赖，后续启动复用编译缓存。
+
 `tools/develop.ps1` 含中文提示，必须保存为带 BOM 的 UTF-8，以兼容启动入口使用的 Windows PowerShell 5.1；无 BOM 时中文可能被按系统旧编码解析，产生引号 / 语句块错误。PowerShell 7 也可读取带 BOM 的版本。
 
 ## 数据与同步
