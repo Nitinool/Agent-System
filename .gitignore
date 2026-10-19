@@ -1,18 +1,18 @@
-__pycache__/
+# Local application data, credentials and temporary setup tools
 data/
-*.csv
 .setup/
-.venv/
-venv/
-.pytest_cache/
-.env
-.env.*
-!.env.example
+*.dpapi
+*.csv
 *.sqlite3
 *.sqlite
 *.db
 *.log
 *.zip
+.env
+.env.*
+!.env.example
+
+# New desktop dependencies and generated output
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/

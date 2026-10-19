@@ -386,9 +386,7 @@ pub fn run() {
         Err(error) => {
             rfd::MessageDialog::new()
                 .set_title("Agent System 启动失败")
-                .set_description(format!(
-                    "{error}\n请检查数据目录或启动环境。旧版数据未被修改。"
-                ))
+                .set_description(format!("{error}\n请检查数据目录或启动环境。"))
                 .set_level(rfd::MessageLevel::Error)
                 .show();
         }
