@@ -49,6 +49,8 @@ C++ 编译环境需安装完整的 Visual Studio 2022 Build Tools，包含“C++
 
 日常交付默认完成代码修改、必要检查和 GitHub 推送，不自动生成安装包。只有用户明确提出打包要求时，才运行 `npm run bundle` 及安装验证；开发运行、前端构建和 Rust 检查不受影响。
 
+只编译最新可执行程序、不生成安装包时，在 desktop 目录执行 `npm run tauri -- build --no-bundle`。这会编译前端和 Rust，并更新 `src-tauri/target/release/agent-system.exe`；桌面免编译脚本之后直接运行该新程序。命令不会运行 NSIS 或安装器，正式业务数据也不参与编译。
+
 ```powershell
 npm run build
 npm test
