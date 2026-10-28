@@ -54,9 +54,15 @@ describe('money and shared date rules', () => {
     expect(onDay(task, '2026-10-21')).toBe(false)
     expect(onDay({ ...task, excluded_days: ['2026-10-17'] }, '2026-10-17')).toBe(false)
   })
-  it('completed ranges leave Today but remain on calendar', () => {
-    expect(onDay({ ...task, status: '已完成' }, '2026-10-17')).toBe(false)
+  it('completed ranges remain in Today and on the calendar', () => {
+    expect(onDay({ ...task, status: '已完成' }, '2026-10-17')).toBe(true)
     expect(calendarDay({ ...task, status: '已完成' }, '2026-10-17')).toBe(true)
+  })
+  it('completed ranges still respect explicit removals and date boundaries', () => {
+    const completed = { ...task, status: '已完成', excluded_days: ['2026-10-18'] }
+    expect(onDay(completed, '2026-10-18')).toBe(false)
+    expect(onDay(completed, '2026-10-19')).toBe(true)
+    expect(onDay(completed, '2026-10-21')).toBe(false)
   })
   it('manual membership remains separate from automatic ranges', () => {
     expect(onDay({ ...task, days: ['2026-11-01'] }, '2026-11-01')).toBe(true)

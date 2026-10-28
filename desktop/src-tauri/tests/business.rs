@@ -85,8 +85,56 @@ fn single_day_future_and_completion_membership() {
             completed: true,
         },
     );
-    assert!(!rules::on_day(&task(&r, &id), "2026-10-17"));
+    assert!(rules::on_day(&task(&r, &id), "2026-10-17"));
     assert!(rules::calendar_day(&task(&r, &id), "2026-10-17"));
+}
+#[test]
+fn completed_today_rows_remain_until_explicitly_removed_and_can_be_readded() {
+    let mut r = Records::new();
+    let mut draft = edit("完成后保留", None, None);
+    draft.end = Some("2026-10-20".into());
+    let id = add(&mut r, Mutation::SaveTask { uid: None, draft });
+    add(
+        &mut r,
+        Mutation::CompleteTask {
+            uid: id.clone(),
+            completed: true,
+        },
+    );
+    assert!(rules::on_day(&task(&r, &id), "2026-10-17"));
+    assert!(rules::on_day(&task(&r, &id), "2026-10-19"));
+    assert!(!rules::on_day(&task(&r, &id), "2026-10-21"));
+    let history = task(&r, &id).completions;
+    add(
+        &mut r,
+        Mutation::Today {
+            uid: id.clone(),
+            day: "2026-10-17".into(),
+            included: false,
+        },
+    );
+    assert!(!rules::on_day(&task(&r, &id), "2026-10-17"));
+    assert_eq!(task(&r, &id).completions, history);
+    assert_eq!(task(&r, &id).status, "已完成");
+    add(
+        &mut r,
+        Mutation::Today {
+            uid: id.clone(),
+            day: "2026-10-17".into(),
+            included: true,
+        },
+    );
+    assert!(rules::on_day(&task(&r, &id), "2026-10-17"));
+    add(
+        &mut r,
+        Mutation::CompleteTask {
+            uid: id.clone(),
+            completed: false,
+        },
+    );
+    assert!(rules::on_day(&task(&r, &id), "2026-10-17"));
+    assert_eq!(task(&r, &id).completions.len(), 1);
+    assert!(task(&r, &id).completions[0].reopened_at.is_some());
 }
 #[test]
 fn task_edit_preserves_skips_memberships_hidden_fields_and_stage() {

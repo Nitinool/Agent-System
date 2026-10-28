@@ -95,8 +95,7 @@ pub fn valid_uid(uid: &str) -> bool {
 }
 pub fn on_day(task: &Task, date: &str) -> bool {
     task.days.iter().any(|x| x == date)
-        || (task.status != "已完成"
-            && task.range_start.as_deref().is_some_and(|s| s <= date)
+        || (task.range_start.as_deref().is_some_and(|s| s <= date)
             && task.range_end.as_deref().is_some_and(|e| e >= date)
             && !task.excluded_days.iter().any(|x| x == date))
 }
@@ -609,7 +608,7 @@ pub fn mutate(records: &mut Records, change: Mutation, at: &str) -> Result<Strin
                 && t.range_end.as_ref().is_some_and(|e| e >= &d);
             t.days.retain(|v| v != &d);
             t.excluded_days.retain(|v| v != &d);
-            if in_range && !included && t.status != "已完成" {
+            if in_range && !included {
                 t.excluded_days.push(d);
             } else if !in_range && included {
                 if t.planned_on.is_none() {

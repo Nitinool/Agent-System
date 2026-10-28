@@ -132,6 +132,14 @@ try {
   await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
   await expect(page.getByRole('button', { name: '真实 Rust 事项', exact: false })).toBeVisible()
   await page.getByRole('checkbox', { name: '完成 真实 Rust 事项' }).click()
+  await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).toBeChecked()
+  await expect(page.locator('.today .task-row').filter({ hasText: '真实 Rust 事项' })).toHaveClass(
+    /done/,
+  )
+  await page.getByRole('checkbox', { name: '隐藏已完成' }).check()
+  await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).toHaveCount(0)
+  await page.getByRole('checkbox', { name: '隐藏已完成' }).uncheck()
+  await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).toBeChecked()
   await expect(page.getByRole('button', { name: '撤销完成操作' })).toBeVisible()
   await page.getByRole('button', { name: '撤销完成操作' }).click()
   await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).not.toBeChecked()
@@ -239,6 +247,7 @@ try {
   await close()
   await start()
   expect((await ipc('snapshot')).records).toEqual(persisted)
+  await expect(page.getByRole('checkbox', { name: '完成 真实 Rust 事项' })).toBeChecked()
   expect((await ipc('capture_status')).running).toBe(false)
   expect((await ipc('sync_status')).has_token).toBe(true)
   await ipc('sync_configure', {

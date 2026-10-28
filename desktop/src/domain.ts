@@ -25,8 +25,7 @@ export function shiftDay(day: string, delta: number): string {
 export function onDay(task: Task, day: string): boolean {
   return (
     task.days.includes(day) ||
-    (task.status !== '已完成' &&
-      !!task.range_start &&
+    (!!task.range_start &&
       !!task.range_end &&
       task.range_start <= day &&
       day <= task.range_end &&

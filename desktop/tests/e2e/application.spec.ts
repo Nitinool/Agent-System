@@ -170,7 +170,7 @@ test.beforeEach(async ({ page }) => {
       }
       if (command === 'capture_status') return { running: false, message: '已暂停', exclusions: '' }
       if (command === 'sync_status') return status
-      if (command === 'segments') return []
+      if (command === 'segments') return (window as any).__TEST_SEGMENTS__ ?? []
       if (['app_ready', 'set_editing'].includes(command)) return null
       if (command === 'mutate') {
         if (fail) {
@@ -203,6 +203,13 @@ test.beforeEach(async ({ page }) => {
               reopened_at: null,
             })
           else if (t.completions.length) t.completions.at(-1).reopened_at = new Date().toISOString()
+        }
+        if (m.type === 'today') {
+          const t = records[id].fields
+          t.days = t.days.filter((d: string) => d !== m.day)
+          t.excluded_days = t.excluded_days.filter((d: string) => d !== m.day)
+          if (m.included) t.days.push(m.day)
+          else t.excluded_days.push(m.day)
         }
         if (m.type === 'delete') {
           if (
@@ -387,7 +394,7 @@ test('category defaults respect overrides and every project editor requires a st
       )![0]
     }, name)
   }
-  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '事项', exact: true }).click()
   await page.getByRole('button', { name: '新增事项', exact: false }).click()
   await page.getByLabel('事项名称').fill('跨项目草稿')
   await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目甲']!)
@@ -434,11 +441,12 @@ test('category defaults respect overrides and every project editor requires a st
   await expect(page.getByLabel('分类', { exact: true })).toHaveValue('生活')
   await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue(ideaA!)
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await page.getByRole('navigation').getByRole('link', { name: '事项', exact: true }).click()
-  await page.getByRole('button', { name: '新增事项', exact: false }).click()
-  await page.getByLabel('事项名称').fill('月历项目事项')
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await page.getByLabel('快捷事项').fill('主页项目事项')
+  await page.getByLabel('快捷事项').press('Enter')
+  await page.getByRole('button', { name: '主页项目事项', exact: false }).click()
   await page.getByLabel('所属项目', { exact: true }).selectOption(created['项目甲']!)
-  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('沟通')
+  await expect(page.getByLabel('分类', { exact: true })).toHaveValue('其他')
   await expect(page.getByLabel('所属阶段', { exact: true })).toHaveValue('')
   await page.getByLabel('所属阶段', { exact: true }).selectOption(ideaA!)
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -489,6 +497,105 @@ test('completed items stay in their stage and ideas do not inflate target progre
   await page.screenshot({ path: 'test-results/projects-1100.png' })
   await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
   await expect(page.locator('.home-project')).toContainText('0 / 1 完成')
+})
+
+test('home puts Today first and keeps time distribution at the viewport bottom', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(
+    page.locator('.home .page-head').getByRole('button', { name: '新增事项', exact: false }),
+  ).toHaveCount(0)
+  for (const [width, height] of [
+    [1440, 880],
+    [1100, 700],
+    [1796, 1095],
+  ]) {
+    await page.setViewportSize({ width: width!, height: height! })
+    const today = await page.locator('.home-columns > .today').boundingBox()
+    const notes = await page.locator('.home-columns > .notes').boundingBox()
+    const right = await page.locator('.home-columns > .home-right').boundingBox()
+    expect(today!.x).toBeLessThan(notes!.x)
+    expect(notes!.x).toBeLessThan(right!.x)
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const main = document.querySelector('main')!,
+            chart = document.querySelector('.time-summary')!
+          return Math.abs(
+            chart.getBoundingClientRect().bottom -
+              (main.getBoundingClientRect().bottom -
+                parseFloat(getComputedStyle(main).paddingBottom)),
+          )
+        }),
+      )
+      .toBeLessThanOrEqual(2)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.evaluate(() => {
+    ;(window as any).__TEST_SEGMENTS__ = [
+      {
+        id: 1,
+        start: '2026-10-28T12:00:00+08:00',
+        last_seen: '2026-10-28T12:20:00+08:00',
+        end: '2026-10-28T12:20:00+08:00',
+        seconds: 1200,
+        app: 'Codex',
+        process: 'Codex.exe',
+        title: '测试记录',
+        kind: 'activity',
+        status: 'ended',
+        reason: '',
+        resume_reason: '',
+        category: '开发',
+      },
+    ]
+  })
+  await page.getByRole('navigation').getByRole('link', { name: '项目', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await expect(page.locator('.time-summary canvas')).toBeVisible()
+  await page.setViewportSize({ width: 1100, height: 700 })
+  await page.screenshot({ path: 'test-results/home-layout-1100.png' })
+})
+
+test('completed Today rows stay visible with strike-through and can hide, reopen and remove', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByLabel('快捷事项').fill('完成后仍保留')
+  await page.getByLabel('快捷事项').press('Enter')
+  const row = page.locator('.today .task-row').filter({ hasText: '完成后仍保留' })
+  const checked = page.getByRole('checkbox', { name: '完成 完成后仍保留' })
+  await expect(row).toBeVisible()
+  await page.evaluate(() => (window as any).__TEST_FAIL__())
+  await checked.click()
+  await expect(checked).not.toBeChecked()
+  await checked.click()
+  await expect(checked).toBeChecked()
+  await expect(row).toHaveClass(/done/)
+  await expect(page.locator('.today .panel-head')).toContainText('1 / 1')
+  expect(
+    await row.locator('.task-title > span').evaluate((e) => getComputedStyle(e).textDecorationLine),
+  ).toContain('line-through')
+  const snap = await page.evaluate(() => (window as any).__TEST_BRIDGE__('snapshot', {}))
+  expect(Object.values(snap.records)).toHaveLength(1)
+  expect((Object.values(snap.records)[0] as any).fields.status).toBe('已完成')
+  await page.getByRole('checkbox', { name: '隐藏已完成' }).check()
+  await expect(row).toHaveCount(0)
+  await page.getByRole('checkbox', { name: '隐藏已完成' }).uncheck()
+  await expect(checked).toBeChecked()
+  await page.getByRole('navigation').getByRole('link', { name: '事项', exact: true }).click()
+  await page.getByRole('navigation').getByRole('link', { name: '今日', exact: true }).click()
+  await expect(checked).toBeChecked()
+  await page.screenshot({ path: 'test-results/home-completed-1440.png' })
+  await checked.click()
+  await expect(checked).not.toBeChecked()
+  await expect(row).not.toHaveClass(/done/)
+  await checked.click()
+  await row.getByRole('button', { name: '移出', exact: true }).click()
+  await expect(row).toHaveCount(0)
+  const after = await page.evaluate(() => (window as any).__TEST_BRIDGE__('snapshot', {}))
+  expect((Object.values(after.records)[0] as any).fields.status).toBe('已完成')
 })
 
 for (const scale of [1.25, 1.5])

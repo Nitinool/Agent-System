@@ -103,44 +103,8 @@ onBeforeUnmount(() => {
           }}</small
         >
       </h1>
-      <button class="primary" @click="app.openEditor({ kind: 'tasks' })">＋ 新增事项</button>
     </header>
     <div class="home-columns">
-      <section class="panel notes">
-        <div class="panel-head">
-          <h2>随笔</h2>
-          <small class="muted">最近 200 条</small>
-        </div>
-        <form class="note-entry" @submit.prevent="app.addNote">
-          <input
-            v-model="app.noteDraft"
-            aria-label="随笔内容"
-            placeholder="记下此刻的想法…"
-            maxlength="500"
-          /><button :disabled="app.loading || !app.noteDraft.trim()" title="保存随笔">确定</button>
-        </form>
-        <div v-if="!app.notes.length" class="empty">还没有随笔</div>
-        <NVirtualList
-          v-else
-          :items="app.notes.map((n) => ({ ...n, key: n.uid }))"
-          :item-size="36"
-          :style="{ height: '330px' }"
-          key-field="uid"
-          ><template #default="{ item }"
-            ><button class="note-row" @click="note = item.data" @dblclick="note = item.data">
-              <time>{{
-                new Date(item.data.created_at).toLocaleString('zh-CN', {
-                  month: '2-digit',
-                  day: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              }}</time
-              ><span>{{ item.data.title }}</span>
-            </button></template
-          ></NVirtualList
-        >
-      </section>
       <section class="panel today">
         <div class="panel-head">
           <h2>
@@ -160,12 +124,47 @@ onBeforeUnmount(() => {
             maxlength="120"
           /><button title="添加今日事项" :disabled="app.loading || !quick.trim()">＋</button>
         </form>
-        <TaskList :items="visible" today-actions :height="295" /><button
+        <TaskList :items="visible" today-actions fill /><button
           class="quiet existing"
           @click="pick = true"
         >
           ＋ 从已有事项添加
         </button>
+      </section>
+      <section class="panel notes">
+        <div class="panel-head">
+          <h2>随笔</h2>
+          <small class="muted">最近 200 条</small>
+        </div>
+        <form class="note-entry" @submit.prevent="app.addNote">
+          <input
+            v-model="app.noteDraft"
+            aria-label="随笔内容"
+            placeholder="记下此刻的想法…"
+            maxlength="500"
+          /><button :disabled="app.loading || !app.noteDraft.trim()" title="保存随笔">确定</button>
+        </form>
+        <div v-if="!app.notes.length" class="empty">还没有随笔</div>
+        <NVirtualList
+          v-else
+          :items="app.notes.map((n) => ({ ...n, key: n.uid }))"
+          :item-size="36"
+          :style="{ height: '0px', flex: '1 1 0', minHeight: '0' }"
+          key-field="uid"
+          ><template #default="{ item }"
+            ><button class="note-row" @click="note = item.data" @dblclick="note = item.data">
+              <time>{{
+                new Date(item.data.created_at).toLocaleString('zh-CN', {
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              }}</time
+              ><span>{{ item.data.title }}</span>
+            </button></template
+          ></NVirtualList
+        >
       </section>
       <div class="home-right">
         <section class="panel">
@@ -225,18 +224,18 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </div>
-    <section class="panel">
+    <div class="summary-line">
+      求职 <span>已投 {{ app.jobs.length }} 个岗位</span
+      ><span>面试中 {{ app.jobs.filter((j) => j.data.status === '面试中').length }}</span
+      ><span>Offer {{ app.jobs.filter((j) => j.data.status === '已获 Offer').length }}</span>
+    </div>
+    <section class="panel time-summary">
       <div class="panel-head">
         <h2>今天的时间分配 <small class="muted">按应用 · 已记录的前台停留</small></h2>
         <RouterLink to="/records" class="muted">查看记录</RouterLink>
       </div>
       <TimeChart :data="chart" />
     </section>
-    <div class="summary-line">
-      求职 <span>已投 {{ app.jobs.length }} 个岗位</span
-      ><span>面试中 {{ app.jobs.filter((j) => j.data.status === '面试中').length }}</span
-      ><span>Offer {{ app.jobs.filter((j) => j.data.status === '已获 Offer').length }}</span>
-    </div>
     <NModal
       :show="!!note"
       preset="card"
@@ -277,10 +276,35 @@ onBeforeUnmount(() => {
   </section>
 </template>
 <style scoped>
+.home {
+  height: 100%;
+  min-height: 0;
+}
 .home-columns {
+  flex: 1;
+  min-height: 240px;
   display: grid;
-  grid-template-columns: minmax(0, 28fr) minmax(0, 44fr) minmax(0, 28fr);
+  grid-template-columns: minmax(0, 44fr) minmax(0, 28fr) minmax(0, 28fr);
   gap: 14px;
+}
+.today,
+.notes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.today > .empty,
+.notes > .empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+}
+.time-summary {
+  flex-shrink: 0;
+}
+.time-summary :deep(.chart),
+.time-summary :deep(.chart-empty) {
+  height: 180px;
 }
 .note-entry,
 .quick-entry {
@@ -337,7 +361,7 @@ onBeforeUnmount(() => {
 }
 .active-projects {
   flex: 1;
-  max-height: 290px;
+  min-height: 0;
   overflow: auto;
 }
 .home-project {

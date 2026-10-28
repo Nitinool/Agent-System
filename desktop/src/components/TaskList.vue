@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
-import { NVirtualList, NButton, NCheckbox } from 'naive-ui'
+import { computed } from 'vue'
+import { NVirtualList, NCheckbox } from 'naive-ui'
 import { useApp, type Row } from '../state'
 import { colors } from '../domain'
 const props = withDefaults(
-  defineProps<{ items: Row<'tasks'>[]; todayActions?: boolean; height?: number }>(),
+  defineProps<{ items: Row<'tasks'>[]; todayActions?: boolean; height?: number; fill?: boolean }>(),
   { height: 320 },
 )
 const app = useApp()
@@ -16,7 +16,11 @@ const projectCode = (id: string | null) => (id ? `#${id.slice(0, 8).toUpperCase(
   <div v-if="!items.length" class="empty">暂无事项</div>
   <NVirtualList
     v-else
-    :style="{ height: height + 'px' }"
+    :style="{
+      height: fill ? '0px' : height + 'px',
+      flex: fill ? '1 1 0' : undefined,
+      minHeight: fill ? '0' : undefined,
+    }"
     :item-size="44"
     :items="items"
     key-field="uid"
