@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "事项便签",
+  "version": "0.1.0",
+  "identifier": "com.nitinool.tasknotes",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1431",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "事项便签",
+        "width": 1160,
+        "height": 860,
+        "minWidth": 820,
+        "minHeight": 620,
+        "visible": false
+      },
+      {
+        "label": "sticky",
+        "title": "今日待办 · 事项便签",
+        "url": "index.html?view=sticky",
+        "width": 350,
+        "height": 460,
+        "minWidth": 280,
+        "minHeight": 240,
+        "alwaysOnTop": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'"
+    }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

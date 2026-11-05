@@ -1,0 +1,6 @@
+{
+  "identifier": "task-windows",
+  "description": "Only the two local application windows receive events",
+  "windows": ["main", "sticky"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

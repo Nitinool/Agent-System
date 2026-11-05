@@ -2,8 +2,9 @@
 
 先阅读 README.md、desktop/README.md 和 开发交接.md，检查 git status；工作区干净时 git pull --ff-only，不覆盖未提交改动。
 
-- 本项目仅维护 desktop/ 的 Windows Tauri 2 / Vue 3 / TypeScript / Rust 新版。2026-10-19 用户明确要求退役并删除旧 Python 工程、本机旧数据和旧远端同步文件；已保存的投递记录须完整核对迁入新版。不要恢复旧入口、Python sidecar 或自动导入其他旧模块。
-- 正式数据只保存到 %LOCALAPPDATA%/Agent-System-V2/，当前 SQLite schema 2；已有新版数据、完成历史、同步基线、加密凭据和备份不得重置。数据库 schema 1→2 的事务升级及同步格式 1–6 兼容属于新版必要功能，保留对应实现与测试。
+- desktop/ 维护 Windows Tauri 2 / Vue 3 / TypeScript / Rust 主应用；2026-11-05 新增 todo-desktop/ 独立“事项便签”，以其 README 为准。2026-10-19 用户明确要求退役并删除旧 Python 工程、本机旧数据和旧远端同步文件；已保存的投递记录须完整核对迁入新版。不要恢复旧入口、Python sidecar 或自动导入其他旧模块。
+- 主应用正式数据只保存到 %LOCALAPPDATA%/Agent-System-V2/，当前 SQLite schema 2；已有新版数据、完成历史、同步基线、加密凭据和备份不得重置。数据库 schema 1→2 的事务升级及同步格式 1–6 兼容属于新版必要功能，保留对应实现与测试。
+- 事项便签使用独立 %LOCALAPPDATA%/Task-Notes/tasks.sqlite3（schema 1），用户明确先不导入原事项，不共用原数据 / 凭据 / 同步路径。两个窗口共用 SQLite 事务与版本检查，保存后广播刷新；所有新增事项默认本地今天，结束为空为单日，完成项按日期保留，桌面便签仅显示今日待办、支持置顶与勾选，跨天自动更新。不恢复无关模块，也不引入对主应用源码的运行依赖。
 - MSIX 开发宿主可能把相同 AppData 路径重定向到自身 LocalCache。必须核对文件物理路径，不能只看 LOCALAPPDATA 字符串；启动前拒绝隔离资料目录。恢复既有新版副本需明确授权、备份双方并检查目标，不能覆盖非空数据库。
 - 前端只经 bridge.ts 的类型化 Tauri 命令调用 Rust 服务；SQLite 由单独工作线程管理。Rust model.rs 是契约来源，src/bindings/ 由 ts-rs 生成，不手改。核心业务不依赖 UI 或平台句柄。
 - GitHub 数据同步限定私有仓库 Nitinool/Agent-System-data 的 sync/v2/records.json；不再读取或写入 sync/records.json。写格式：含项目 / 阶段及其删除标记用 6，其余依类型使用 1–5。接收前备份、逐条解决冲突、以文件 SHA 防止并发覆盖；不上传行为日志。

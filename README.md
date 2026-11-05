@@ -4,6 +4,8 @@ Windows 10 / 11 x64 个人记录与行动管理应用，仅保留 Tauri 2 / Vue 
 
 ## 启动
 
+独立的“事项便签”应用见 [todo-desktop/README.md](todo-desktop/README.md)，双击 **启动事项便签.cmd** 可运行本机已编译程序。它只包含事项、今日待办和桌面便签，使用独立数据，不导入或改动下面主应用的数据。
+
 双击根目录 **启动桌面新版.cmd**。开发环境需要 Node.js 24、Rust 1.99.1 MSVC、Visual Studio 2022 C++ Build Tools / Windows SDK 和 WebView2，安装与排障见 [desktop/README.md](desktop/README.md)。
 
 也可以在 desktop 目录执行：
