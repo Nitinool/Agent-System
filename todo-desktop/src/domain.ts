@@ -153,6 +153,9 @@ export function orderedTree(
 }
 
 const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+export function weekdayShort(day: string): string {
+  return weekdays[new Date(day + "T12:00:00").getDay()];
+}
 export function dayLabel(day: string): string {
   const date = new Date(day + "T12:00:00");
   return `${date.getMonth() + 1}月${date.getDate()}日 周${weekdays[date.getDay()]}`;

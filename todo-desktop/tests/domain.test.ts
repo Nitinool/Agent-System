@@ -11,6 +11,7 @@ import {
   sortBucket,
   sortTasks,
   today,
+  weekdayShort,
 } from "../src/domain";
 import type { Task } from "../src/bindings/Task";
 
@@ -57,6 +58,7 @@ describe("独立事项的日期与完成显示", () => {
     expect(monthCells("2026-11")[0]).toBe("2026-10-26");
     expect(shiftDay("2026-12-31", 1)).toBe("2027-01-01");
     expect(dayLabel("2026-11-04")).toBe("11月4日 周三");
+    expect(weekdayShort("2026-11-04")).toBe("三");
   });
 
   it("完成项排在后面，按手动顺序排列，不修改原集合", () => {

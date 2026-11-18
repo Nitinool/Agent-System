@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   CalendarDays,
+  CalendarRange,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
@@ -13,7 +14,19 @@ import {
   Tag,
 } from "lucide-vue-next";
 import { app } from "./state";
-import { bucketOf, bucketOrder, bucketTitles, dayLabel, monthCells, onDay, shiftDay, shortDay, sortBucket } from "./domain";
+import {
+  bucketOf,
+  bucketOrder,
+  bucketTitles,
+  dayLabel,
+  monthCells,
+  onDay,
+  priorityColor,
+  shiftDay,
+  shortDay,
+  sortBucket,
+  weekdayShort,
+} from "./domain";
 import type { Task } from "./bindings/Task";
 import TaskRows from "./components/TaskRows.vue";
 import TaskEditor from "./components/TaskEditor.vue";
@@ -29,12 +42,16 @@ const selected = ref(app.state.day);
 const month = ref(app.state.day.slice(0, 7));
 const search = ref("");
 const hideDone = ref(false);
-const layout = ref<"list" | "calendar">(
-  localStorage.getItem("task-notes-layout") === "calendar" ? "calendar" : "list",
+type Layout = "list" | "week" | "calendar";
+const storedLayout = localStorage.getItem("task-notes-layout");
+const layout = ref<Layout>(
+  storedLayout === "calendar" || storedLayout === "week" ? storedLayout : "list",
 );
+const weekOffset = ref(0);
 const editing = ref(false);
 const edited = ref<Task | null>(null);
 const editingParent = ref<string | null>(null);
+const editingStart = ref<string | null>(null);
 const dialog = ref<{ kind: "project" | "section" | "label"; id: string | null; projectId: string | null } | null>(
   null,
 );
@@ -99,6 +116,24 @@ const calendar = computed(
 const selectedDayTasks = computed(() =>
   visible.value.filter((task) => onDay(task, selected.value)),
 );
+const weekDays = computed(() =>
+  Array.from({ length: 7 }, (_, index) =>
+    shiftDay(app.state.day, weekOffset.value + index),
+  ),
+);
+const weekLabel = computed(() => {
+  const days = weekDays.value;
+  return `${shortDay(days[0])} – ${shortDay(days[6])}`;
+});
+const weekTasks = computed(
+  () =>
+    new Map(
+      weekDays.value.map((day) => [
+        day,
+        visible.value.filter((task) => onDay(task, day)),
+      ]),
+    ),
+);
 
 const listTitle = computed(() => {
   if (view.value === "today") return "今天";
@@ -128,9 +163,10 @@ function openLabel(id: string) {
   labelId.value = id;
   view.value = "label";
 }
-function createTask() {
+function createTask(start: string | null = null) {
   edited.value = null;
   editingParent.value = null;
+  editingStart.value = start;
   editing.value = true;
 }
 function edit(task: Task | null = null) {
@@ -140,6 +176,7 @@ function edit(task: Task | null = null) {
   }
   edited.value = task;
   editingParent.value = null;
+  editingStart.value = null;
   editing.value = true;
 }
 function manageLabel(id: string | null = null) {
@@ -237,6 +274,13 @@ onUnmounted(app.stop);
             >
               <LayoutList :size="16" /></button
             ><button
+              :class="{ active: layout === 'week' }"
+              aria-label="七天布局"
+              :aria-pressed="layout === 'week'"
+              @click="layout = 'week'"
+            >
+              <CalendarRange :size="16" /></button
+            ><button
               :class="{ active: layout === 'calendar' }"
               aria-label="月历布局"
               :aria-pressed="layout === 'calendar'"
@@ -247,7 +291,7 @@ onUnmounted(app.stop);
           </span>
           <button @click="app.action('show_sticky')">
             <StickyNote :size="16" />便签</button
-          ><button class="primary" :disabled="!app.state.ready" @click="createTask">
+          ><button class="primary" :disabled="!app.state.ready" @click="createTask()">
             <Plus :size="17" />新增事项
           </button>
         </div>
@@ -328,6 +372,65 @@ onUnmounted(app.stop);
         </section>
       </template>
 
+      <template v-else-if="layout === 'week'">
+        <div class="toolbar">
+          <button aria-label="上一周" @click="weekOffset -= 7">
+            <ChevronLeft :size="16" /></button
+          ><span class="week-range">{{ weekLabel }}</span
+          ><button aria-label="下一周" @click="weekOffset += 7">
+            <ChevronRight :size="16" /></button
+          ><button @click="weekOffset = 0">回到本周</button><span class="grow" />
+          <input
+            v-model="search"
+            type="search"
+            aria-label="搜索事项"
+            placeholder="搜索事项 / 备注 / 标签"
+          /><label class="inline-label"
+            ><input type="checkbox" v-model="hideDone" />隐藏已完成</label
+          >
+        </div>
+        <section class="panel week-panel" aria-label="七天安排">
+          <div class="week-grid">
+            <div
+              v-for="day in weekDays"
+              :key="day"
+              class="week-column"
+              :class="{ current: day === app.state.day }"
+            >
+              <header class="week-head">
+                <span class="week-date">{{ shortDay(day) }}</span>
+                <span class="week-weekday">周{{ weekdayShort(day) }}</span>
+              </header>
+              <div class="week-body">
+                <button
+                  v-for="task in weekTasks.get(day)"
+                  :key="task.id"
+                  class="week-task"
+                  :class="{ done: task.completed }"
+                  :style="{ '--c': task.color }"
+                  :title="task.title"
+                  @click="edit(task)"
+                >
+                  <span
+                    class="priority-bar"
+                    :style="{ background: priorityColor(task.priority) }"
+                  />
+                  <span class="week-task-title">{{ task.title }}</span>
+                </button>
+                <p v-if="!(weekTasks.get(day)?.length)" class="week-empty">没有安排</p>
+                <button
+                  class="week-add"
+                  :aria-label="'在 ' + day + ' 新增事项'"
+                  @click="createTask(day)"
+                >
+                  ＋
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
+
       <section v-else class="panel list-panel expanded">
         <header class="panel-head">
           <h2>
@@ -373,6 +476,7 @@ onUnmounted(app.stop);
     :open="editing"
     :task="edited"
     :parent-id="editingParent"
+    :start-day="editingStart"
     @close="editing = false"
   />
   <ManageDialog

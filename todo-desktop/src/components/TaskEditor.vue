@@ -19,8 +19,9 @@ const props = withDefaults(
     task: Task | null;
     projectId?: string | null;
     parentId?: string | null;
+    startDay?: string | null;
   }>(),
-  { projectId: null, parentId: null },
+  { projectId: null, parentId: null, startDay: null },
 );
 const emit = defineEmits<{ close: [] }>();
 
@@ -60,7 +61,7 @@ watch(
           }
         : {
             ...newDraft(
-              app.state.day,
+              props.startDay ?? app.state.day,
               colors[app.snapshot.value.tasks.length % colors.length],
             ),
             project_id: props.projectId,

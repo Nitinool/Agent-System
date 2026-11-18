@@ -307,11 +307,25 @@ try {
     main.locator(".task-row").filter({ hasText: "写方案" }),
   ).toBeVisible();
 
-  // 布局切换记住并切回
+  // 回到所有事项再切布局，否则视图仍被标签过滤
+  await main.locator(".sidebar").getByRole("button", { name: "所有事项" }).click();
+
+  // 布局切换：月历 / 七天 / 列表
   await main.getByRole("button", { name: "月历布局" }).click();
   await expect(main.locator(".calendar")).toBeVisible();
+  await main.getByRole("button", { name: "七天布局" }).click();
+  await expect(main.locator(".week-grid .week-column")).toHaveCount(7);
+  // 在七天的某一天直接新增，开始日期应落在那一天
+  await main.getByRole("button", { name: "在 " + tomorrow + " 新增事项" }).click();
+  await expect(main.getByLabel("开始日期", { exact: true })).toHaveValue(tomorrow);
+  await main.getByLabel("事项名称", { exact: true }).fill("七天布局新增");
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(
+    main.locator(".week-task").filter({ hasText: "七天布局新增" }),
+  ).toBeVisible();
   await main.getByRole("button", { name: "列表布局" }).click();
   await expect(main.locator(".calendar")).toHaveCount(0);
+  await expect(main.locator(".week-grid")).toHaveCount(0);
 
   expect(errors).toEqual([]);
   console.log(
@@ -337,6 +351,7 @@ try {
           "subtask",
           "time-buckets",
           "layout-switch",
+          "week-layout",
         ],
         errors,
       },
