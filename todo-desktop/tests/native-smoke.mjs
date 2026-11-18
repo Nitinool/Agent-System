@@ -360,6 +360,14 @@ try {
   expect(rolled.completions[0].due_date).toBe(day);
   expect(rolled.start).toBe(tomorrow);
 
+  // 勾掉后仍在今天、带完成样式；隐藏已完成时消失，取消后回来
+  const dailyRow = main.locator(".task-row").filter({ hasText: "每日复习" });
+  await expect(dailyRow).toHaveClass(/done/);
+  await main.getByRole("checkbox", { name: "隐藏已完成" }).check();
+  await expect(dailyRow).toHaveCount(0);
+  await main.getByRole("checkbox", { name: "隐藏已完成" }).uncheck();
+  await expect(dailyRow).toBeVisible();
+
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify(
@@ -388,6 +396,7 @@ try {
           "label-filter",
           "recurrence-daily",
           "recurrence-roll",
+          "hide-completed",
         ],
         errors,
       },

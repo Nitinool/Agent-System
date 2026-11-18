@@ -67,7 +67,7 @@ function drop(target: string) {
       :key="row.task.id"
       class="task-row"
       :class="{
-        done: row.task.completed,
+        done: doneOn(row.task, app.state.day),
         compact,
         subtask: row.depth > 0,
         dragging: dragged === row.task.id,

@@ -191,6 +191,30 @@ describe("重复事项", () => {
     });
     expect(doneOn(reopened, "2026-11-18")).toBe(false);
   });
+
+  it("勾掉的重复事项排到最后，第二天又回到正常位置", () => {
+    const done = task({
+      id: "done",
+      position: 1,
+      recurrence: "daily",
+      completions: [
+        {
+          completed_at: "2026-11-18T09:00:00+08:00",
+          reopened_at: null,
+          due_date: "2026-11-18",
+        },
+      ],
+    });
+    const open = task({ id: "open", position: 2 });
+    expect(sortTasks([done, open], "2026-11-18").map((t) => t.id)).toEqual([
+      "open",
+      "done",
+    ]);
+    expect(sortTasks([done, open], "2026-11-19").map((t) => t.id)).toEqual([
+      "done",
+      "open",
+    ]);
+  });
 });
 
 describe("子事项", () => {

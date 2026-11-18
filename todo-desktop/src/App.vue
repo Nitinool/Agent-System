@@ -27,6 +27,7 @@ import {
   shortDay,
   showsOn,
   sortBucket,
+  sortTasks,
   weekdayShort,
 } from "./domain";
 import type { Task } from "./bindings/Task";
@@ -96,7 +97,7 @@ const scoped = computed<Task[]>(() => {
 const visible = computed(() => {
   const needle = search.value.trim().toLocaleLowerCase();
   return scoped.value.filter((task) => {
-    if (hideDone.value && task.completed) return false;
+    if (hideDone.value && doneOn(task, app.state.day)) return false;
     if (!needle) return true;
     const names = task.label_ids
       .map((id) => labels.value.find((label) => label.id === id)?.name ?? "")
@@ -135,7 +136,7 @@ const groups = computed<Array<{ key: string; title: string; tasks: Task[] }>>(()
     .map((key) => ({
       key,
       title: bucketTitles[key],
-      tasks: sortBucket(buckets.get(key) ?? []),
+      tasks: sortBucket(buckets.get(key) ?? [], app.state.day),
     }));
 });
 
@@ -144,12 +145,12 @@ const calendar = computed(
     new Map(
       monthCells(month.value).map((day) => [
         day,
-        layoutTasks.value.filter((task) => showsOn(task, day)),
+        sortTasks(layoutTasks.value.filter((task) => showsOn(task, day)), day),
       ]),
     ),
 );
 const selectedDayTasks = computed(() =>
-  layoutTasks.value.filter((task) => showsOn(task, selected.value)),
+  sortTasks(layoutTasks.value.filter((task) => showsOn(task, selected.value)), selected.value),
 );
 const weekDays = computed(() =>
   Array.from({ length: 7 }, (_, index) =>
@@ -165,7 +166,7 @@ const weekTasks = computed(
     new Map(
       weekDays.value.map((day) => [
         day,
-        layoutTasks.value.filter((task) => showsOn(task, day)),
+        sortTasks(layoutTasks.value.filter((task) => showsOn(task, day)), day),
       ]),
     ),
 );
@@ -390,7 +391,7 @@ onUnmounted(app.stop);
                 v-for="t in calendar.get(d)?.slice(0, 3)"
                 :key="t.id"
                 class="calendar-task"
-                :class="{ done: t.completed }"
+                :class="{ done: doneOn(t, d) }"
                 :style="{ borderColor: t.color }"
                 >{{ t.title }}</span
               ><small v-if="(calendar.get(d)?.length ?? 0) > 3" class="muted"
@@ -453,7 +454,7 @@ onUnmounted(app.stop);
                   v-for="task in weekTasks.get(day)"
                   :key="task.id"
                   class="week-task"
-                  :class="{ done: task.completed }"
+                  :class="{ done: doneOn(task, day) }"
                   :style="{ '--c': task.color }"
                   :title="task.title"
                   @click="edit(task)"

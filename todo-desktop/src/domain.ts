@@ -113,10 +113,11 @@ export function filterByLabels(items: readonly Task[], selected: readonly string
   return items.filter((task) => task.label_ids.some((id) => wanted.has(id)));
 }
 
-/** 时间分组内部：按开始日期排，无日期的沉底，同日期保持手动顺序。 */
-export function sortBucket(items: readonly Task[]) {
+/** 时间分组内部：未完成在前，其次按开始日期，无日期的沉底，同日期保持手动顺序。 */
+export function sortBucket(items: readonly Task[], day = today()) {
   return [...items].sort(
     (a, b) =>
+      Number(doneOn(a, day)) - Number(doneOn(b, day)) ||
       (a.start ?? "9999-12-31").localeCompare(b.start ?? "9999-12-31") ||
       a.position - b.position ||
       a.id.localeCompare(b.id),
@@ -169,11 +170,11 @@ export function newDraft(day = today(), color = colors[0]): TaskDraft {
   };
 }
 
-/** 未完成在前，其余按手动顺序；不修改原数组。 */
-export function sortTasks(items: readonly Task[]) {
+/** 未完成在前，其余按手动顺序；不修改原数组。重复事项以「当天是否已勾」为准。 */
+export function sortTasks(items: readonly Task[], day = today()) {
   return [...items].sort(
     (a, b) =>
-      Number(a.completed) - Number(b.completed) ||
+      Number(doneOn(a, day)) - Number(doneOn(b, day)) ||
       a.position - b.position ||
       a.created_at.localeCompare(b.created_at) ||
       a.id.localeCompare(b.id),
