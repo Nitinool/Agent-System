@@ -15,9 +15,9 @@ npm ci
 npm run desktop
 ```
 
-仓库根目录 `启动桌面新版.cmd` 可协助定位本机工具链。另一台电脑需要独立安装上述开发工具；仓库仅保留这套新版入口。
+开发入口脚本 `tools/develop.ps1` 会协助定位本机工具链。另一台电脑需要独立安装上述开发工具；仓库仅保留这套新版入口。
 
-根目录 `启动现有桌面版.cmd` 是免编译入口，转到 `tools/run-existing.ps1` 直接运行现有 release EXE，不调用 Cargo、npm 或安装器。可以传 `-CheckOnly` 仅检查文件与版本；文件缺失就报错，不自动构建。已有 EXE 属于忽略提交的构建产物，另一台电脑拉取代码后不保证存在；运行内容以该 EXE 的构建时间为准。原开发入口继续用于需要编译和热更新时。日常从资源管理器双击启动，避免 MSIX 宿主隔离资料路径。
+免编译入口是 `tools/run-existing.ps1`（`powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-existing.ps1`）：直接运行现有 release EXE，不调用 Cargo、npm 或安装器。可以传 `-CheckOnly` 仅检查文件与版本；文件缺失就报错，不自动构建。已有 EXE 属于忽略提交的构建产物，另一台电脑拉取代码后不保证存在；运行内容以该 EXE 的构建时间为准。原开发入口继续用于需要编译和热更新时。日常从资源管理器双击启动，避免 MSIX 宿主隔离资料路径。
 
 如果启动提示“请先安装 Rust MSVC 工具链”，请先运行 [Rust 官方 Windows 安装器](https://rust-lang.org/tools/install/)，选择默认的 `x86_64-pc-windows-msvc` 工具链。安装完成后在本目录执行 `rustup show`，会按 `rust-toolchain.toml` 使用指定版本。Cargo 通常位于 `%USERPROFILE%\.cargo\bin\cargo.exe`，启动脚本会自动加入该目录。
 

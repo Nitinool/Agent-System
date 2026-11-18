@@ -6,7 +6,7 @@ Windows 10 / 11 x64 个人记录与行动管理应用，仅保留 Tauri 2 / Vue 
 
 独立的“事项便签”应用见 [todo-desktop/README.md](todo-desktop/README.md)，双击 **启动事项便签.cmd** 可运行本机已编译程序。它只包含事项、今日待办和桌面便签，使用独立数据，不导入或改动下面主应用的数据。
 
-双击根目录 **启动桌面新版.cmd**。开发环境需要 Node.js 24、Rust 1.99.1 MSVC、Visual Studio 2022 C++ Build Tools / Windows SDK 和 WebView2，安装与排障见 [desktop/README.md](desktop/README.md)。
+在 `desktop` 目录执行下面的命令，或运行 `desktop/tools/develop.ps1`。开发环境需要 Node.js 24、Rust 1.99.1 MSVC、Visual Studio 2022 C++ Build Tools / Windows SDK 和 WebView2，安装与排障见 [desktop/README.md](desktop/README.md)。
 
 也可以在 desktop 目录执行：
 
@@ -17,7 +17,7 @@ npm run desktop
 
 脚本启动开发模式，会使用本机编译缓存；关闭窗口会退出应用。没有明确要求时不生成安装包。
 
-临时测试已有程序可双击 **启动现有桌面版.cmd**：只运行现有的 `desktop/src-tauri/target/release/agent-system.exe`，不会调用 Cargo、安装依赖或生成安装包。此入口运行的是上次构建的版本，源码变更需之后重新编译才会进入程序；没有现成 EXE 时明确报错。请从文件资源管理器启动，以使用正常用户资料目录。
+临时测试已有程序可运行 `desktop/tools/run-existing.ps1`：只运行现有的 `desktop/src-tauri/target/release/agent-system.exe`，不会调用 Cargo、安装依赖或生成安装包。此入口运行的是上次构建的版本，源码变更需之后重新编译才会进入程序；没有现成 EXE 时明确报错。请从文件资源管理器启动，以使用正常用户资料目录。
 
 ## 功能
 

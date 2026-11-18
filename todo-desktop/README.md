@@ -11,7 +11,7 @@
 - 点击“便签”打开独立桌面小窗口，只列今日待办；可置顶 / 取消置顶、直接勾选和返回主窗口。两个窗口实时联动，跨午夜和睡眠唤醒后按本地日期更新。
 - 便签打开时关闭主窗口会继续保留便签；关闭最后一个可见窗口或点击便签底部“退出应用”会结束程序。再次打开应用可唤回主窗口。
 
-双击本目录 **启动.cmd**，或仓库根目录 **启动事项便签.cmd**，运行已经编译好的程序，不重新编译。没有 EXE 时会明确提示先构建。当前使用嵌入界面的 debug EXE；可单独运行，不需要 Node、Rust 或业务服务器，电脑须有 WebView2。
+双击仓库根目录 **启动事项便签.cmd**，运行已经编译好的程序，不重新编译。没有 EXE 时会明确提示先构建。当前使用嵌入界面的 debug EXE；可单独运行，不需要 Node、Rust 或业务服务器，电脑须有 WebView2。
 
 ## 数据
 
@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -Build
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -CheckOnly
 ```
 
-构建后将嵌入界面的程序复制到 bin/task-notes.exe，日常入口固定运行该文件；后续开发构建不会把它替换成依赖 Vite 的开发程序。开发模式使用端口 1431，与原应用的端口不同。仓库根目录“开发事项便签.cmd”也可打开开发模式。tools/start.ps1 含中文，保存为 UTF-8 BOM，兼容 Windows PowerShell 5.1。
+构建后将嵌入界面的程序复制到 bin/task-notes.exe，日常入口固定运行该文件；后续开发构建不会把它替换成依赖 Vite 的开发程序。开发模式即上面的 `npm run desktop`（或 `tools/start.ps1 -Develop`），使用端口 1431，与原应用的端口不同。tools/start.ps1 含中文，保存为 UTF-8 BOM，兼容 Windows PowerShell 5.1。
 
 ```powershell
 npm run build
