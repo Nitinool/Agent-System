@@ -783,3 +783,27 @@ legend {
   justify-content: flex-start;
   gap: 8px;
 }
+.layout-switch {
+  display: inline-flex;
+  border: 1px solid #dce1e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.layout-switch button {
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #64748b;
+  padding: 4px 8px;
+  min-height: 30px;
+}
+.layout-switch button + button {
+  border-left: 1px solid #e6ebf2;
+}
+.layout-switch button.active {
+  background: #e0eaff;
+  color: #1d4ed8;
+}
+.layout-switch button:hover {
+  background: #eef3fc;
+}

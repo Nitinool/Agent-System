@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bucketOf,
   dayLabel,
   monthCells,
   newDraft,
@@ -7,6 +8,7 @@ import {
   orderedTree,
   parentOptions,
   shiftDay,
+  sortBucket,
   sortTasks,
   today,
 } from "../src/domain";
@@ -68,7 +70,46 @@ describe("独立事项的日期与完成显示", () => {
   });
 });
 
-describe("项目、标签与子事项", () => {
+describe("所有事项的时间分组", () => {
+  const day = "2026-11-18";
+
+  it("按今天、明天、本周、以后、待安排、已过期归桶，每条只归一个", () => {
+    expect(bucketOf(task({ start: null, end: null }), day)).toBe("none");
+    expect(bucketOf(task({ start: "2026-11-10", end: "2026-11-10" }), day)).toBe("overdue");
+    expect(bucketOf(task({ start: day, end: null }), day)).toBe("today");
+    expect(bucketOf(task({ start: "2026-11-17", end: "2026-11-20" }), day)).toBe("today");
+    expect(bucketOf(task({ start: "2026-11-19", end: null }), day)).toBe("tomorrow");
+    expect(bucketOf(task({ start: "2026-11-21", end: null }), day)).toBe("week");
+    expect(bucketOf(task({ start: "2026-12-30", end: null }), day)).toBe("later");
+  });
+
+  it("范围已经走完才算过期，跨今天的不算", () => {
+    expect(bucketOf(task({ start: "2026-11-01", end: "2026-11-17" }), day)).toBe("overdue");
+    expect(bucketOf(task({ start: "2026-11-01", end: "2026-11-18" }), day)).toBe("today");
+  });
+
+  it("显式移出今天的事项不再进今天桶", () => {
+    const moved = task({ start: day, end: day, excluded_days: [day] });
+    expect(bucketOf(moved, day)).not.toBe("today");
+  });
+
+  it("同一个桶里按开始日期排，无日期的沉底，同日期保持手动顺序", () => {
+    const list = [
+      task({ id: "none", start: null, position: 1 }),
+      task({ id: "late", start: "2026-12-20", position: 2 }),
+      task({ id: "early", start: "2026-12-01", position: 3 }),
+      task({ id: "same-b", start: "2026-12-01", position: 9 }),
+    ];
+    expect(sortBucket(list).map((t) => t.id)).toEqual([
+      "early",
+      "same-b",
+      "late",
+      "none",
+    ]);
+  });
+});
+
+describe("子事项", () => {
   it("子事项紧跟在父事项后面并带层级", () => {
     const parent = task({ id: "p", position: 1 });
     const child = task({ id: "c", position: 5, parent_id: "p" });

@@ -31,19 +31,10 @@ const deleting = ref(false);
 const nameInput = ref<HTMLInputElement>();
 
 const dirty = computed(() => JSON.stringify(f) !== initial.value);
-const projects = computed(() =>
-  app.snapshot.value.projects.filter((project) => !project.archived),
-);
-const sections = computed(() =>
-  app.snapshot.value.sections.filter(
-    (section) => section.project_id === f.project_id,
-  ),
-);
+// 项目 / 分区这一层暂时从界面撤掉，数据仍保留；父事项不限项目，选中后自动跟随父事项的项目。
 const parentChoices = computed(() =>
   parentOptions(
-    app.snapshot.value.tasks.filter(
-      (task) => task.project_id === f.project_id && task.id !== props.task?.id,
-    ),
+    app.snapshot.value.tasks.filter((task) => task.id !== props.task?.id),
     props.task?.id ?? null,
   ),
 );
@@ -85,12 +76,6 @@ watch(
   },
 );
 
-function setProject(value: string) {
-  f.project_id = value || null;
-  f.section_id = null;
-  const parent = app.snapshot.value.tasks.find((task) => task.id === f.parent_id);
-  if (parent && parent.project_id !== f.project_id) f.parent_id = null;
-}
 function setParent(value: string) {
   f.parent_id = value || null;
   if (!f.parent_id) return;
@@ -178,32 +163,18 @@ function keyboard(event: KeyboardEvent) {
             autocomplete="off"
         /></label>
 
-        <div class="field-grid">
-          <label
-            >项目<select
-              :value="f.project_id ?? ''"
-              :disabled="app.state.loading"
-              @change="setProject(($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">收件箱</option>
-              <option v-for="p in projects" :key="p.id" :value="p.id">
-                {{ p.name }}
-              </option>
-            </select></label
+        <label
+          >父事项<select
+            :value="f.parent_id ?? ''"
+            :disabled="app.state.loading"
+            @change="setParent(($event.target as HTMLSelectElement).value)"
           >
-          <label
-            >分区<select
-              :value="f.section_id ?? ''"
-              :disabled="app.state.loading || !sections.length"
-              @change="f.section_id = ($event.target as HTMLSelectElement).value || null"
-            >
-              <option value="">无分区</option>
-              <option v-for="s in sections" :key="s.id" :value="s.id">
-                {{ s.name }}
-              </option>
-            </select></label
-          >
-        </div>
+            <option value="">无（顶层事项）</option>
+            <option v-for="t in parentChoices" :key="t.id" :value="t.id">
+              {{ t.title }}
+            </option>
+          </select></label
+        >
 
         <fieldset>
           <legend>优先级</legend>
@@ -228,19 +199,6 @@ function keyboard(event: KeyboardEvent) {
             </label>
           </div>
         </fieldset>
-
-        <label
-          >父事项<select
-            :value="f.parent_id ?? ''"
-            :disabled="app.state.loading"
-            @change="setParent(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">无（顶层事项）</option>
-            <option v-for="t in parentChoices" :key="t.id" :value="t.id">
-              {{ t.title }}
-            </option>
-          </select></label
-        >
 
         <fieldset>
           <legend>标签</legend>

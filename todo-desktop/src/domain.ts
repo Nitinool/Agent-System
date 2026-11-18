@@ -61,8 +61,41 @@ export function onDay(t: Task, day: string): boolean {
   );
 }
 
+/** 时间分组内部：按开始日期排，无日期的沉底，同日期保持手动顺序。 */
+export function sortBucket(items: readonly Task[]) {
+  return [...items].sort(
+    (a, b) =>
+      (a.start ?? "9999-12-31").localeCompare(b.start ?? "9999-12-31") ||
+      a.position - b.position ||
+      a.id.localeCompare(b.id),
+  );
+}
+
 export function inProject(t: Task, projectId: string | null) {
   return t.project_id === projectId;
+}
+
+export type Bucket = "overdue" | "today" | "tomorrow" | "week" | "later" | "none";
+export const bucketOrder: Bucket[] = ["overdue", "today", "tomorrow", "week", "later", "none"];
+export const bucketTitles: Record<Bucket, string> = {
+  overdue: "已过期",
+  today: "今天",
+  tomorrow: "明天",
+  week: "本周内",
+  later: "以后",
+  none: "待安排",
+};
+
+/** 一条事项只归一个时间桶：先看是否已过期，再按今天 / 明天 / 七天内 / 以后 / 待安排。 */
+export function bucketOf(t: Task, day: string): Bucket {
+  if (!t.start && !t.end) return "none";
+  const start = t.start ?? t.end ?? day;
+  const end = t.end ?? start;
+  if (end < day) return "overdue";
+  if (onDay(t, day)) return "today";
+  if (onDay(t, shiftDay(day, 1))) return "tomorrow";
+  if (start <= shiftDay(day, 7)) return "week";
+  return "later";
 }
 
 export function newDraft(day = today(), color = colors[0]): TaskDraft {
