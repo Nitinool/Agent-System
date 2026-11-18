@@ -1,11 +1,16 @@
-use crate::model::*;
+use crate::{
+    migrate,
+    model::{AppError, Result, *},
+};
 use chrono::{Local, NaiveDate};
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
+use std::collections::HashMap;
 use std::path::Path;
 
 pub struct Store {
     conn: Connection,
 }
+
 fn ensure(ok: bool, message: &str) -> Result<()> {
     if ok {
         Ok(())
@@ -13,6 +18,7 @@ fn ensure(ok: bool, message: &str) -> Result<()> {
         Err(AppError::new("validation", message))
     }
 }
+
 fn date(value: &str) -> Result<()> {
     ensure(
         value.len() == 10
@@ -21,20 +27,135 @@ fn date(value: &str) -> Result<()> {
         "日期必须是有效的 YYYY-MM-DD。",
     )
 }
-fn validate(draft: &mut Draft) -> Result<()> {
+
+fn color(value: &str) -> Result<()> {
+    ensure(
+        value.len() == 7
+            && value.starts_with('#')
+            && value[1..].bytes().all(|c| c.is_ascii_hexdigit()),
+        "请选择有效的颜色。",
+    )
+}
+
+/// 事项是否落在某一天：显式排除优先，其次显式加入，最后看日期范围。
+pub fn on_day(task: &Task, day: &str) -> bool {
+    !task.excluded_days.iter().any(|d| d == day)
+        && (task.included_days.iter().any(|d| d == day)
+            || task
+                .start
+                .as_deref()
+                .is_some_and(|s| s <= day && day <= task.end.as_deref().unwrap_or(s)))
+}
+
+fn row_to_task(r: &Row<'_>) -> rusqlite::Result<Task> {
+    Ok(Task {
+        id: r.get(0)?,
+        project_id: r.get(1)?,
+        section_id: r.get(2)?,
+        parent_id: r.get(3)?,
+        title: r.get(4)?,
+        notes: r.get(5)?,
+        color: r.get(6)?,
+        priority: r.get(7)?,
+        start: r.get(8)?,
+        end: r.get(9)?,
+        position: r.get(10)?,
+        completed: r.get(11)?,
+        completions: Vec::new(),
+        included_days: Vec::new(),
+        excluded_days: Vec::new(),
+        label_ids: Vec::new(),
+        created_at: r.get(12)?,
+        updated_at: r.get(13)?,
+    })
+}
+
+const TASK_COLUMNS: &str = "id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,position,completed,created_at,updated_at";
+
+fn load_task(conn: &Connection, id: &str) -> Result<Option<Task>> {
+    let sql = format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?1");
+    let Some(mut task) = conn.query_row(&sql, [id], row_to_task).optional()? else {
+        return Ok(None);
+    };
+    let mut statement = conn.prepare("SELECT label_id FROM task_labels WHERE task_id=?1 ORDER BY label_id")?;
+    task.label_ids = statement
+        .query_map([id], |r| r.get(0))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    let mut statement = conn.prepare(
+        "SELECT completed_at,reopened_at FROM task_completions WHERE task_id=?1 ORDER BY id",
+    )?;
+    task.completions = statement
+        .query_map([id], |r| {
+            Ok(Completion {
+                completed_at: r.get(0)?,
+                reopened_at: r.get(1)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<Completion>, _>>()?;
+    let mut statement =
+        conn.prepare("SELECT day,included FROM task_days WHERE task_id=?1 ORDER BY day")?;
+    for row in statement.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (day, included) = row?;
+        if included == 1 {
+            task.included_days.push(day);
+        } else {
+            task.excluded_days.push(day);
+        }
+    }
+    Ok(Some(task))
+}
+
+fn next_position(conn: &Connection, table: &str) -> Result<i32> {
+    let sql = format!("SELECT COALESCE(MAX(position),-1)+1 FROM {table}");
+    Ok(conn.query_row(&sql, [], |r| r.get(0))?)
+}
+
+fn exists(conn: &Connection, table: &str, id: &str) -> Result<bool> {
+    let sql = format!("SELECT 1 FROM {table} WHERE id=?1");
+    Ok(conn
+        .query_row(&sql, [id], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
+fn project_of(conn: &Connection, id: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT project_id FROM tasks WHERE id=?1", [id], |r| r.get(0))
+        .optional()?
+        .flatten())
+}
+
+/// 父事项链上溯，用于阻止事项成为自己的祖先。
+fn would_cycle(conn: &Connection, id: &str, parent: &str) -> Result<bool> {
+    let mut current = Some(parent.to_string());
+    let mut guard = 0;
+    while let Some(candidate) = current {
+        if candidate == id {
+            return Ok(true);
+        }
+        guard += 1;
+        if guard > 200 {
+            return Ok(true);
+        }
+        current = conn
+            .query_row("SELECT parent_id FROM tasks WHERE id=?1", [&candidate], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .flatten();
+    }
+    Ok(false)
+}
+
+fn validate_task(conn: &Connection, id: Option<&str>, draft: &mut TaskDraft) -> Result<()> {
     draft.title = draft.title.trim().into();
     ensure(
         !draft.title.is_empty() && draft.title.chars().count() <= 200,
         "事项名称不能为空，最多 200 字。",
     )?;
     ensure(draft.notes.chars().count() <= 50_000, "备注最多 50000 字。")?;
-    ensure(draft.category.chars().count() <= 40, "分类最多 40 字。")?;
-    ensure(
-        draft.color.len() == 7
-            && draft.color.starts_with('#')
-            && draft.color[1..].bytes().all(|c| c.is_ascii_hexdigit()),
-        "请选择有效的事项颜色。",
-    )?;
+    color(&draft.color)?;
+    ensure((1..=4).contains(&draft.priority), "优先级必须是 1 到 4。")?;
     if let Some(start) = &draft.start {
         date(start)?;
     }
@@ -45,151 +166,494 @@ fn validate(draft: &mut Draft) -> Result<()> {
         draft.end.is_none() || draft.start.is_some(),
         "设置结束日期前，请先选择开始日期。",
     )?;
-    ensure(
-        draft.end.is_none() || draft.end >= draft.start,
-        "结束日期不能早于开始日期。",
-    )
+    if let (Some(start), Some(end)) = (&draft.start, &draft.end) {
+        ensure(end >= start, "结束日期不能早于开始日期。")?;
+    }
+    draft.label_ids.sort();
+    draft.label_ids.dedup();
+    for label in &draft.label_ids {
+        ensure(exists(conn, "labels", label)?, "标签不存在，请刷新后重试。")?;
+    }
+    if let Some(project) = &draft.project_id {
+        ensure(exists(conn, "projects", project)?, "项目不存在，请刷新后重试。")?;
+    }
+    if let Some(section) = &draft.section_id {
+        let owner: Option<String> = conn
+            .query_row("SELECT project_id FROM sections WHERE id=?1", [section], |r| r.get(0))
+            .optional()?;
+        let owner = owner.ok_or_else(|| AppError::new("validation", "分区不存在，请刷新后重试。"))?;
+        ensure(
+            draft.project_id.as_deref() == Some(owner.as_str()),
+            "分区不属于所选项目。",
+        )?;
+    }
+    if let Some(parent) = &draft.parent_id {
+        ensure(exists(conn, "tasks", parent)?, "父事项不存在，请刷新后重试。")?;
+        ensure(
+            id != Some(parent.as_str()),
+            "事项不能作为自己的父事项。",
+        )?;
+        if let Some(self_id) = id {
+            ensure(!would_cycle(conn, self_id, parent)?, "父子关系不能形成循环。")?;
+        }
+        let owner = project_of(conn, parent)?;
+        ensure(
+            owner == draft.project_id,
+            "子事项必须与父事项在同一个项目。",
+        )?;
+    }
+    Ok(())
 }
-pub fn on_day(task: &Task, day: &str) -> bool {
-    !task.excluded_days.iter().any(|d| d == day)
-        && (task.included_days.iter().any(|d| d == day)
-            || task
-                .start
-                .as_deref()
-                .is_some_and(|s| s <= day && day <= task.end.as_deref().unwrap_or(s)))
+
+fn save_task(
+    conn: &Connection,
+    id: Option<String>,
+    draft: &mut TaskDraft,
+    now: &str,
+) -> Result<()> {
+    // 子事项没填项目时跟随父事项，避免落在收件箱里跟父事项分家。
+    if draft.project_id.is_none() {
+        if let Some(parent) = &draft.parent_id {
+            draft.project_id = project_of(conn, parent)?;
+        }
+    }
+    let existing = match &id {
+        Some(id) => Some(
+            load_task(conn, id)?
+                .ok_or_else(|| AppError::new("missing", "事项已被删除，请重新新增。"))?,
+        ),
+        None => None,
+    };
+    validate_task(conn, id.as_deref(), draft)?;
+    let task_id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let position = match &existing {
+        Some(task) => task.position,
+        None => next_position(conn, "tasks")?,
+    };
+    let created_at = match &existing {
+        Some(task) => task.created_at.clone(),
+        None => now.to_string(),
+    };
+    // 日期变了就清掉旧的单日排除，和旧版行为一致：改期后重新按新范围显示。
+    if let Some(task) = &existing {
+        if task.start != draft.start || task.end != draft.end {
+            conn.execute(
+                "DELETE FROM task_days WHERE task_id=?1 AND included=0",
+                [&task_id],
+            )?;
+        }
+    }
+    conn.execute(
+        "INSERT INTO tasks(id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,position,completed,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+         ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,section_id=excluded.section_id,parent_id=excluded.parent_id,title=excluded.title,notes=excluded.notes,color=excluded.color,priority=excluded.priority,start_date=excluded.start_date,end_date=excluded.end_date,updated_at=excluded.updated_at",
+        params![
+            task_id,
+            draft.project_id,
+            draft.section_id,
+            draft.parent_id,
+            draft.title,
+            draft.notes,
+            draft.color,
+            draft.priority,
+            draft.start,
+            draft.end,
+            position,
+            existing.as_ref().is_some_and(|task| task.completed),
+            created_at,
+            now
+        ],
+    )?;
+    conn.execute("DELETE FROM task_labels WHERE task_id=?1", [&task_id])?;
+    for label in &draft.label_ids {
+        conn.execute(
+            "INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?1,?2)",
+            params![task_id, label],
+        )?;
+    }
+    Ok(())
 }
+
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        ensure(version <= 1, "资料来自更高版本，请更新应用；未修改数据。")?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-            BEGIN IMMEDIATE;
-            CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
-            INSERT OR IGNORE INTO state VALUES(1,0);
-            PRAGMA user_version=1; COMMIT;")?;
+        ensure(version <= 2, "资料来自更高版本，请更新应用；未修改数据。")?;
+        match version {
+            0 => migrate::create(&conn)?,
+            1 => {
+                migrate::upgrade_from_1(&mut conn, path)?;
+            }
+            _ => {}
+        }
         Ok(Self { conn })
     }
+
     pub fn snapshot(&self) -> Result<Snapshot> {
         let revision = self
             .conn
             .query_row("SELECT revision FROM state WHERE id=1", [], |r| r.get(0))?;
+
+        let mut projects = Vec::new();
+        let mut statement = self.conn.prepare(
+            "SELECT id,name,color,position,favorite,archived,created_at,updated_at FROM projects ORDER BY position,created_at,id",
+        )?;
+        for row in statement.query_map([], |r| {
+            Ok(Project {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                color: r.get(2)?,
+                position: r.get(3)?,
+                favorite: r.get(4)?,
+                archived: r.get(5)?,
+                created_at: r.get(6)?,
+                updated_at: r.get(7)?,
+            })
+        })? {
+            projects.push(row?);
+        }
+
+        let mut sections = Vec::new();
+        let mut statement = self.conn.prepare(
+            "SELECT id,project_id,name,position,created_at,updated_at FROM sections ORDER BY position,created_at,id",
+        )?;
+        for row in statement.query_map([], |r| {
+            Ok(Section {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                name: r.get(2)?,
+                position: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })? {
+            sections.push(row?);
+        }
+
+        let mut labels = Vec::new();
+        let mut statement = self.conn.prepare(
+            "SELECT id,name,color,position,created_at,updated_at FROM labels ORDER BY position,created_at,id",
+        )?;
+        for row in statement.query_map([], |r| {
+            Ok(Label {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                color: r.get(2)?,
+                position: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })? {
+            labels.push(row?);
+        }
+
+        let sql = format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY position,created_at,id");
+        let mut statement = self.conn.prepare(&sql)?;
+        let mut tasks = statement
+            .query_map([], row_to_task)?
+            .collect::<std::result::Result<Vec<Task>, _>>()?;
+        drop(statement);
+
+        let mut index: HashMap<String, usize> = HashMap::with_capacity(tasks.len());
+        for (position, task) in tasks.iter().enumerate() {
+            index.insert(task.id.clone(), position);
+        }
         let mut statement = self
             .conn
-            .prepare("SELECT payload FROM tasks ORDER BY rowid")?;
-        let mut tasks = vec![];
-        for row in statement.query_map([], |r| r.get::<_, String>(0))? {
-            tasks.push(serde_json::from_str(&row?)?);
+            .prepare("SELECT task_id,label_id FROM task_labels ORDER BY label_id")?;
+        for row in statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+            let (task, label) = row?;
+            if let Some(position) = index.get(&task) {
+                tasks[*position].label_ids.push(label);
+            }
         }
-        Ok(Snapshot { revision, tasks })
+        let mut statement = self.conn.prepare(
+            "SELECT task_id,completed_at,reopened_at FROM task_completions ORDER BY task_id,id",
+        )?;
+        for row in statement.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                Completion {
+                    completed_at: r.get(1)?,
+                    reopened_at: r.get(2)?,
+                },
+            ))
+        })? {
+            let (task, completion) = row?;
+            if let Some(position) = index.get(&task) {
+                tasks[*position].completions.push(completion);
+            }
+        }
+        let mut statement =
+            self.conn.prepare("SELECT task_id,day,included FROM task_days ORDER BY day")?;
+        for row in statement.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (task, day, included) = row?;
+            if let Some(position) = index.get(&task) {
+                if included == 1 {
+                    tasks[*position].included_days.push(day);
+                } else {
+                    tasks[*position].excluded_days.push(day);
+                }
+            }
+        }
+
+        Ok(Snapshot {
+            revision,
+            projects,
+            sections,
+            labels,
+            tasks,
+        })
     }
+
     pub fn mutate(&mut self, mutation: Mutation, revision: u32) -> Result<Snapshot> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: u32 =
-            tx.query_row("SELECT revision FROM state WHERE id=1", [], |r| r.get(0))?;
+        let current: u32 = tx.query_row("SELECT revision FROM state WHERE id=1", [], |r| r.get(0))?;
         if current != revision {
             return Err(AppError::new(
                 "stale",
                 "另一个窗口已修改事项，已刷新列表，请重试；编辑内容仍保留。",
             ));
         }
-        let id = match &mutation {
-            Mutation::Save { id, .. } => id
-                .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-            Mutation::Complete { id, .. }
-            | Mutation::Delete { id }
-            | Mutation::Today { id, .. } => id.clone(),
-        };
-        let payload: Option<String> = tx
-            .query_row("SELECT payload FROM tasks WHERE id=?", [&id], |r| r.get(0))
-            .optional()?;
-        let mut task: Option<Task> = payload.as_deref().map(serde_json::from_str).transpose()?;
         let now = Local::now().to_rfc3339();
         match mutation {
-            Mutation::Save {
-                id: existing,
-                mut draft,
-            } => {
-                validate(&mut draft)?;
-                ensure(
-                    existing.is_none() || task.is_some(),
-                    "事项已被删除，请重新新增。",
-                )?;
-                let mut t = task.unwrap_or_else(|| Task {
-                    id: id.clone(),
-                    title: String::new(),
-                    start: None,
-                    end: None,
-                    category: String::new(),
-                    color: String::new(),
-                    notes: String::new(),
-                    completed: false,
-                    completions: vec![],
-                    included_days: vec![],
-                    excluded_days: vec![],
-                    created_at: now.clone(),
-                    updated_at: now.clone(),
-                });
-                let end = draft.end.or_else(|| draft.start.clone());
-                if t.start != draft.start || t.end != end {
-                    t.excluded_days.clear();
-                }
-                t.title = draft.title;
-                t.start = draft.start;
-                t.end = end;
-                t.category = draft.category;
-                t.color = draft.color;
-                t.notes = draft.notes;
-                task = Some(t);
+            Mutation::TaskSave { id, mut draft } => save_task(&tx, id, &mut draft, &now)?,
+            Mutation::TaskComplete { id, completed } => complete_task(&tx, &id, completed, &now)?,
+            Mutation::TaskDelete { id } => {
+                ensure(exists(&tx, "tasks", &id)?, "事项已被删除。")?;
+                tx.execute("DELETE FROM tasks WHERE id=?1", [&id])?;
             }
-            Mutation::Complete { completed, .. } => {
-                let t = task
-                    .as_mut()
-                    .ok_or_else(|| AppError::new("missing", "事项已被删除。"))?;
-                if completed && !t.completed {
-                    t.completions.push(Completion {
-                        completed_at: now.clone(),
-                        reopened_at: None,
-                    });
+            Mutation::TaskToday {
+                id,
+                day,
+                included,
+            } => {
+                date(&day)?;
+                ensure(exists(&tx, "tasks", &id)?, "事项已被删除。")?;
+                tx.execute(
+                    "INSERT INTO task_days(task_id,day,included) VALUES(?1,?2,?3)
+                     ON CONFLICT(task_id,day) DO UPDATE SET included=excluded.included",
+                    params![id, day, i64::from(included)],
+                )?;
+            }
+            Mutation::TaskMove {
+                id,
+                project_id,
+                section_id,
+                parent_id,
+            } => move_task(&tx, &id, project_id, section_id, parent_id, &now)?,
+            Mutation::TaskReorder { ids } => {
+                for (position, id) in ids.iter().enumerate() {
+                    tx.execute(
+                        "UPDATE tasks SET position=?2 WHERE id=?1",
+                        params![id, position as i32],
+                    )?;
                 }
-                if !completed && t.completed {
-                    if let Some(event) = t.completions.last_mut() {
-                        event.reopened_at = Some(now.clone());
+            }
+            Mutation::ProjectSave { id, mut draft } => {
+                draft.name = draft.name.trim().into();
+                ensure(
+                    !draft.name.is_empty() && draft.name.chars().count() <= 100,
+                    "项目名称不能为空，最多 100 字。",
+                )?;
+                color(&draft.color)?;
+                match id {
+                    Some(id) => {
+                        ensure(exists(&tx, "projects", &id)?, "项目已被删除。")?;
+                        tx.execute(
+                            "UPDATE projects SET name=?2,color=?3,favorite=?4,updated_at=?5 WHERE id=?1",
+                            params![id, draft.name, draft.color, draft.favorite, now],
+                        )?;
+                    }
+                    None => {
+                        let position = next_position(&tx, "projects")?;
+                        tx.execute(
+                            "INSERT INTO projects(id,name,color,position,favorite,archived,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,0,?6,?6)",
+                            params![
+                                uuid::Uuid::new_v4().to_string(),
+                                draft.name,
+                                draft.color,
+                                position,
+                                draft.favorite,
+                                now
+                            ],
+                        )?;
                     }
                 }
-                t.completed = completed;
             }
-            Mutation::Today { day, included, .. } => {
-                date(&day)?;
-                let t = task
-                    .as_mut()
-                    .ok_or_else(|| AppError::new("missing", "事项已被删除。"))?;
-                t.included_days.retain(|d| d != &day);
-                t.excluded_days.retain(|d| d != &day);
-                if included {
-                    t.included_days.push(day);
-                } else {
-                    t.excluded_days.push(day);
+            Mutation::ProjectDelete { id } => {
+                ensure(exists(&tx, "projects", &id)?, "项目已被删除。")?;
+                let tasks: i64 =
+                    tx.query_row("SELECT COUNT(*) FROM tasks WHERE project_id=?1", [&id], |r| {
+                        r.get(0)
+                    })?;
+                ensure(
+                    tasks == 0,
+                    "项目内还有事项，请先把它们移到别的项目或收件箱，再删除项目。",
+                )?;
+                tx.execute("DELETE FROM projects WHERE id=?1", [&id])?;
+            }
+            Mutation::SectionSave {
+                id,
+                project_id,
+                name,
+            } => {
+                let name = name.trim().to_string();
+                ensure(
+                    !name.is_empty() && name.chars().count() <= 40,
+                    "分区名称不能为空，最多 40 字。",
+                )?;
+                ensure(exists(&tx, "projects", &project_id)?, "项目已被删除。")?;
+                match id {
+                    Some(id) => {
+                        let owner: Option<String> = tx
+                            .query_row("SELECT project_id FROM sections WHERE id=?1", [&id], |r| {
+                                r.get(0)
+                            })
+                            .optional()?;
+                        ensure(owner.is_some(), "分区已被删除。")?;
+                        ensure(
+                            owner.as_deref() == Some(project_id.as_str()),
+                            "分区不能跨项目移动，请先把它的事项移到目标项目。",
+                        )?;
+                        tx.execute(
+                            "UPDATE sections SET name=?2,updated_at=?3 WHERE id=?1",
+                            params![id, name, now],
+                        )?;
+                    }
+                    None => {
+                        let position: i32 = tx.query_row(
+                            "SELECT COALESCE(MAX(position),-1)+1 FROM sections WHERE project_id=?1",
+                            [&project_id],
+                            |r| r.get(0),
+                        )?;
+                        tx.execute(
+                            "INSERT INTO sections(id,project_id,name,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)",
+                            params![uuid::Uuid::new_v4().to_string(), project_id, name, position, now],
+                        )?;
+                    }
                 }
             }
-            Mutation::Delete { .. } => {
-                ensure(task.is_some(), "事项已被删除。")?;
-                tx.execute("DELETE FROM tasks WHERE id=?", [&id])?;
-                task = None;
+            Mutation::SectionDelete { id } => {
+                ensure(exists(&tx, "sections", &id)?, "分区已被删除。")?;
+                let tasks: i64 =
+                    tx.query_row("SELECT COUNT(*) FROM tasks WHERE section_id=?1", [&id], |r| {
+                        r.get(0)
+                    })?;
+                ensure(
+                    tasks == 0,
+                    "分区内还有事项，请先把它们移出分区，再删除分区。",
+                )?;
+                tx.execute("DELETE FROM sections WHERE id=?1", [&id])?;
             }
-        }
-        if let Some(mut t) = task {
-            t.updated_at = now;
-            tx.execute("INSERT INTO tasks(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", params![id, serde_json::to_string(&t)?])?;
+            Mutation::LabelSave { id, mut draft } => {
+                draft.name = draft.name.trim().into();
+                ensure(
+                    !draft.name.is_empty() && draft.name.chars().count() <= 40,
+                    "标签名称不能为空，最多 40 字。",
+                )?;
+                color(&draft.color)?;
+                match id {
+                    Some(id) => {
+                        ensure(exists(&tx, "labels", &id)?, "标签已被删除。")?;
+                        tx.execute(
+                            "UPDATE labels SET name=?2,color=?3,updated_at=?4 WHERE id=?1",
+                            params![id, draft.name, draft.color, now],
+                        )?;
+                    }
+                    None => {
+                        let position = next_position(&tx, "labels")?;
+                        tx.execute(
+                            "INSERT INTO labels(id,name,color,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)",
+                            params![
+                                uuid::Uuid::new_v4().to_string(),
+                                draft.name,
+                                draft.color,
+                                position,
+                                now
+                            ],
+                        )?;
+                    }
+                }
+            }
+            Mutation::LabelDelete { id } => {
+                ensure(exists(&tx, "labels", &id)?, "标签已被删除。")?;
+                tx.execute("DELETE FROM labels WHERE id=?1", [&id])?;
+            }
         }
         tx.execute("UPDATE state SET revision=revision+1 WHERE id=1", [])?;
         tx.commit()?;
         self.snapshot()
     }
 }
-use rusqlite::OptionalExtension;
+
+fn complete_task(conn: &Connection, id: &str, completed: bool, now: &str) -> Result<()> {
+    let task = load_task(conn, id)?.ok_or_else(|| AppError::new("missing", "事项已被删除。"))?;
+    if completed && !task.completed {
+        conn.execute(
+            "INSERT INTO task_completions(task_id,completed_at,reopened_at) VALUES(?1,?2,NULL)",
+            params![id, now],
+        )?;
+    }
+    if !completed && task.completed {
+        conn.execute(
+            "UPDATE task_completions SET reopened_at=?2 WHERE id=(SELECT MAX(id) FROM task_completions WHERE task_id=?1 AND reopened_at IS NULL)",
+            params![id, now],
+        )?;
+    }
+    conn.execute(
+        "UPDATE tasks SET completed=?2,updated_at=?3 WHERE id=?1",
+        params![id, completed, now],
+    )?;
+    Ok(())
+}
+
+fn move_task(
+    conn: &Connection,
+    id: &str,
+    project_id: Option<String>,
+    section_id: Option<String>,
+    parent_id: Option<String>,
+    now: &str,
+) -> Result<()> {
+    let task = load_task(conn, id)?.ok_or_else(|| AppError::new("missing", "事项已被删除。"))?;
+    if let Some(project) = &project_id {
+        ensure(exists(conn, "projects", project)?, "项目不存在，请刷新后重试。")?;
+    }
+    if let Some(section) = &section_id {
+        let owner: Option<String> = conn
+            .query_row("SELECT project_id FROM sections WHERE id=?1", [section], |r| r.get(0))
+            .optional()?;
+        let owner = owner.ok_or_else(|| AppError::new("validation", "分区不存在，请刷新后重试。"))?;
+        ensure(
+            project_id.as_deref() == Some(owner.as_str()),
+            "分区不属于所选项目。",
+        )?;
+    }
+    if let Some(parent) = &parent_id {
+        ensure(exists(conn, "tasks", parent)?, "父事项不存在，请刷新后重试。")?;
+        ensure(parent != id, "事项不能作为自己的父事项。")?;
+        ensure(!would_cycle(conn, id, parent)?, "父子关系不能形成循环。")?;
+        ensure(
+            project_of(conn, parent)? == project_id,
+            "子事项必须与父事项在同一个项目。",
+        )?;
+    }
+    // 换项目时分区由调用方一并给出；这里不做「保留旧分区」的补救，避免把事项留在别的项目的分区里。
+    let _ = &task;
+    conn.execute(
+        "UPDATE tasks SET project_id=?2,section_id=?3,parent_id=?4,updated_at=?5 WHERE id=?1",
+        params![id, project_id, section_id, parent_id, now],
+    )?;
+    Ok(())
+}

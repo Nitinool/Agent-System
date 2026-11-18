@@ -163,15 +163,19 @@ try {
     await ipc(main, "mutate", {
       revision: snap.revision,
       mutation: {
-        type: "save",
+        type: "task_save",
         id: null,
         draft: {
           title,
+          notes: "",
+          color: "#8b5cf6",
+          priority: 4,
           start,
           end,
-          category: "学习",
-          color: "#8b5cf6",
-          notes: "",
+          project_id: null,
+          section_id: null,
+          parent_id: null,
+          label_ids: [],
         },
       },
     });
@@ -190,7 +194,7 @@ try {
   await expect(
     sticky.getByRole("button", { name: "取消置顶" }),
   ).toHaveAttribute("aria-pressed", "true");
-  await main.getByRole("button", { name: "事项", exact: true }).click();
+  await main.locator(".sidebar").getByRole("button", { name: "月历" }).click();
   await main.screenshot({ path: join(profile, "calendar.png") });
   // Native WebView editor focus and default date, after selecting tomorrow.
   await main.getByLabel(tomorrow, { exact: true }).click();
@@ -205,17 +209,17 @@ try {
   );
   await main.getByRole("button", { name: "取消", exact: true }).click();
   await main.getByRole("button", { name: "放弃修改" }).click();
-  await main.getByRole("button", { name: /今日待办/ }).click();
+  await main.locator(".sidebar").getByRole("button", { name: "今天" }).click();
   await main.getByRole("button", { name: "移出今天 独立应用联动事项" }).click();
   await expect(
     sticky.getByText("独立应用联动事项", { exact: true }),
   ).toHaveCount(0);
-  await main.getByRole("button", { name: "从已有事项添加" }).click();
+  await main.locator(".sidebar").getByRole("button", { name: "全部事项" }).click();
   await main.getByRole("button", { name: "加入今天 独立应用联动事项" }).click();
   await expect(
     sticky.getByText("独立应用联动事项", { exact: true }),
   ).toBeVisible();
-  await main.getByRole("button", { name: /今日待办/ }).click();
+  await main.locator(".sidebar").getByRole("button", { name: "今天" }).click();
   await main.screenshot({ path: join(profile, "main.png") });
   await sticky.screenshot({ path: join(profile, "sticky.png") });
   snap = await ipc(main, "snapshot");
@@ -229,7 +233,7 @@ try {
         return error;
       }
     },
-    { revision: snap.revision - 1, mutation: { type: "delete", id: task.id } },
+    { revision: snap.revision - 1, mutation: { type: "task_delete", id: task.id } },
   );
   expect(rejected.code).toBe("stale");
   // Midnight switches the sticky list without a restart. Preserve system date.
@@ -251,7 +255,10 @@ try {
   ).toBeVisible();
   // Actual editor deletion propagates to both windows.
   await main
-    .getByRole("button", { name: "独立应用联动事项", exact: false })
+    .locator(".task-row")
+    .filter({ hasText: "独立应用联动事项" })
+    .first()
+    .locator(".task-title")
     .click();
   await main.getByRole("button", { name: "删除事项", exact: true }).click();
   await main.getByRole("button", { name: "确认删除", exact: true }).click();
@@ -259,6 +266,51 @@ try {
     sticky.getByText("独立应用联动事项", { exact: true }),
   ).toHaveCount(0);
   expect((await ipc(main, "snapshot")).tasks).toHaveLength(3);
+
+  // ---- M1：项目 / 标签 / 优先级 / 子事项 / 删除保护 ----
+  await main.locator(".sidebar").getByRole("button", { name: "新建项目" }).click();
+  await main.getByLabel("项目名称").fill("工作");
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+  const workItem = main.locator(".nav-item").filter({ hasText: "工作" });
+  await expect(workItem).toBeVisible();
+
+  await main.locator(".sidebar").getByRole("button", { name: "新建标签" }).click();
+  await main.getByLabel("标签名称").fill("紧急");
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(main.locator(".nav-item").filter({ hasText: "紧急" })).toBeVisible();
+
+  await workItem.locator(".nav-main").click();
+  await main.getByRole("button", { name: "新增事项", exact: true }).click();
+  await main.getByLabel("事项名称", { exact: true }).fill("写方案");
+  await main.locator(".priority-option").first().click();
+  await main.locator(".chip-input").filter({ hasText: "紧急" }).click();
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+
+  snap = await ipc(main, "snapshot");
+  const workProject = snap.projects.find((p) => p.name === "工作");
+  expect(workProject).toBeTruthy();
+  const plan = findTask(snap, "写方案");
+  expect(plan.project_id).toBe(workProject.id);
+  expect(plan.priority).toBe(1);
+  expect(plan.label_ids).toHaveLength(1);
+
+  await main.getByRole("button", { name: "新增事项", exact: true }).click();
+  await main.getByLabel("事项名称", { exact: true }).fill("拆解步骤");
+  await main.getByLabel("父事项").selectOption({ label: "写方案" });
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+  snap = await ipc(main, "snapshot");
+  const step = findTask(snap, "拆解步骤");
+  expect(step.parent_id).toBe(plan.id);
+  expect(step.project_id).toBe(workProject.id);
+  await expect(main.locator(".task-row.subtask")).toHaveCount(1);
+
+  await workItem.getByRole("button", { name: "编辑项目 工作" }).click();
+  await main.getByRole("button", { name: "删除", exact: true }).click();
+  await main.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(main.getByText("项目内还有事项")).toBeVisible();
+  await main.getByRole("button", { name: "取消", exact: true }).click();
+  expect((await ipc(main, "snapshot")).projects).toHaveLength(1);
+
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify(
@@ -278,6 +330,11 @@ try {
           "midnight",
           "restart",
           "delete",
+          "project-create",
+          "label-create",
+          "priority",
+          "subtask",
+          "project-delete-guard",
         ],
         errors,
       },

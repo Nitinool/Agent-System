@@ -1,5 +1,6 @@
 import type { Task } from "./bindings/Task";
-import type { Draft } from "./bindings/Draft";
+import type { TaskDraft } from "./bindings/TaskDraft";
+
 export const colors = [
   "#3b82f6",
   "#8b5cf6",
@@ -10,28 +11,48 @@ export const colors = [
   "#ea580c",
   "#475569",
 ];
-export const categories = [
-  "其他",
-  "开发",
-  "学习",
-  "生活",
-  "工作",
-  "求职",
-  "娱乐",
-];
+
+export const priorities = [1, 2, 3, 4] as const;
+
+export function priorityColor(priority: number): string {
+  return priority === 1
+    ? "#dc2626"
+    : priority === 2
+      ? "#ea580c"
+      : priority === 3
+        ? "#2563eb"
+        : "transparent";
+}
+export function priorityName(priority: number): string {
+  return priority === 1 ? "P1" : priority === 2 ? "P2" : priority === 3 ? "P3" : "P4";
+}
+export function priorityTitle(priority: number): string {
+  return priority === 1
+    ? "最高优先级"
+    : priority === 2
+      ? "高优先级"
+      : priority === 3
+        ? "中优先级"
+        : "无优先级";
+}
+
 export function today(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
+
 export function shiftDay(day: string, delta: number) {
   const date = new Date(day + "T12:00:00");
   date.setDate(date.getDate() + delta);
   return today(date);
 }
+
 export function monthCells(month: string) {
   const first = month + "-01",
     weekday = (new Date(first + "T12:00:00").getDay() + 6) % 7;
   return Array.from({ length: 42 }, (_, i) => shiftDay(first, i - weekday));
 }
+
+/** 事项是否落在某一天：显式排除优先，其次显式加入，最后看日期范围。 */
 export function onDay(t: Task, day: string): boolean {
   return (
     !t.excluded_days.includes(day) &&
@@ -39,21 +60,90 @@ export function onDay(t: Task, day: string): boolean {
       (!!t.start && t.start <= day && day <= (t.end || t.start)))
   );
 }
-export function newDraft(day = today(), color = colors[0]): Draft {
+
+export function inProject(t: Task, projectId: string | null) {
+  return t.project_id === projectId;
+}
+
+export function newDraft(day = today(), color = colors[0]): TaskDraft {
   return {
     title: "",
+    notes: "",
+    color,
+    priority: 4,
     start: day,
     end: null,
-    category: "其他",
-    color,
-    notes: "",
+    project_id: null,
+    section_id: null,
+    parent_id: null,
+    label_ids: [],
   };
 }
-export function sortTasks(items: Task[]) {
+
+/** 未完成在前，其余按手动顺序；不修改原数组。 */
+export function sortTasks(items: readonly Task[]) {
   return [...items].sort(
     (a, b) =>
       Number(a.completed) - Number(b.completed) ||
+      a.position - b.position ||
       a.created_at.localeCompare(b.created_at) ||
       a.id.localeCompare(b.id),
   );
+}
+
+/** 把扁平列表排成父子顺序，父事项在前，子事项缩进紧随其后。 */
+export function orderedTree(
+  tasks: readonly Task[],
+): Array<{ task: Task; depth: number }> {
+  const sorted = sortTasks(tasks);
+  const ids = new Set(sorted.map((t) => t.id));
+  const children = new Map<string, Task[]>();
+  const roots: Task[] = [];
+  for (const task of sorted) {
+    if (task.parent_id && ids.has(task.parent_id)) {
+      const list = children.get(task.parent_id);
+      if (list) list.push(task);
+      else children.set(task.parent_id, [task]);
+    } else {
+      roots.push(task);
+    }
+  }
+  const out: Array<{ task: Task; depth: number }> = [];
+  const walk = (list: readonly Task[], depth: number) => {
+    for (const task of list) {
+      out.push({ task, depth });
+      if (depth < 8) walk(children.get(task.id) ?? [], depth + 1);
+    }
+  };
+  walk(roots, 0);
+  return out;
+}
+
+const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+export function dayLabel(day: string): string {
+  const date = new Date(day + "T12:00:00");
+  return `${date.getMonth() + 1}月${date.getDate()}日 周${weekdays[date.getDay()]}`;
+}
+
+export function shortDay(day: string): string {
+  return `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+}
+
+/** 父事项候选：同项目内、排除自己和自己的后代。 */
+export function parentOptions(tasks: readonly Task[], selfId: string | null) {
+  const excluded = new Set<string>();
+  if (selfId) {
+    excluded.add(selfId);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const task of tasks) {
+        if (task.parent_id && excluded.has(task.parent_id) && !excluded.has(task.id)) {
+          excluded.add(task.id);
+          changed = true;
+        }
+      }
+    }
+  }
+  return sortTasks(tasks).filter((task) => !excluded.has(task.id));
 }

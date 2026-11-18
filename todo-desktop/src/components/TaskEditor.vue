@@ -1,36 +1,80 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import type { Task } from "../bindings/Task";
-import type { Draft } from "../bindings/Draft";
+import type { TaskDraft } from "../bindings/TaskDraft";
 import { app } from "../state";
-import { categories, colors, newDraft, shiftDay } from "../domain";
-const props = defineProps<{ task: Task | null; open: boolean }>();
+import {
+  colors,
+  newDraft,
+  parentOptions,
+  priorityColor,
+  priorityName,
+  priorityTitle,
+  shiftDay,
+} from "../domain";
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    task: Task | null;
+    projectId?: string | null;
+    parentId?: string | null;
+  }>(),
+  { projectId: null, parentId: null },
+);
 const emit = defineEmits<{ close: [] }>();
-const f = reactive<Draft>(newDraft()),
-  initial = ref(""),
-  discard = ref(false),
-  deleting = ref(false);
+
+const f = reactive<TaskDraft>(newDraft());
+const initial = ref("");
+const discard = ref(false);
+const deleting = ref(false);
 const nameInput = ref<HTMLInputElement>();
+
 const dirty = computed(() => JSON.stringify(f) !== initial.value);
+const projects = computed(() =>
+  app.snapshot.value.projects.filter((project) => !project.archived),
+);
+const sections = computed(() =>
+  app.snapshot.value.sections.filter(
+    (section) => section.project_id === f.project_id,
+  ),
+);
+const parentChoices = computed(() =>
+  parentOptions(
+    app.snapshot.value.tasks.filter(
+      (task) => task.project_id === f.project_id && task.id !== props.task?.id,
+    ),
+    props.task?.id ?? null,
+  ),
+);
+
 watch(
   () => props.open,
-  async (value) => {
-    if (!value) return;
+  async (open) => {
+    if (!open) return;
     Object.assign(
       f,
       props.task
         ? {
             title: props.task.title,
+            notes: props.task.notes,
+            color: props.task.color,
+            priority: props.task.priority,
             start: props.task.start,
             end: props.task.end === props.task.start ? null : props.task.end,
-            category: props.task.category,
-            color: props.task.color,
-            notes: props.task.notes,
+            project_id: props.task.project_id,
+            section_id: props.task.section_id,
+            parent_id: props.task.parent_id,
+            label_ids: [...props.task.label_ids],
           }
-        : newDraft(
-            app.state.day,
-            colors[app.snapshot.value.tasks.length % colors.length],
-          ),
+        : {
+            ...newDraft(
+              app.state.day,
+              colors[app.snapshot.value.tasks.length % colors.length],
+            ),
+            project_id: props.projectId,
+            parent_id: props.parentId,
+          },
     );
     initial.value = JSON.stringify(f);
     discard.value = false;
@@ -40,6 +84,22 @@ watch(
     nameInput.value?.focus();
   },
 );
+
+function setProject(value: string) {
+  f.project_id = value || null;
+  f.section_id = null;
+  const parent = app.snapshot.value.tasks.find((task) => task.id === f.parent_id);
+  if (parent && parent.project_id !== f.project_id) f.parent_id = null;
+}
+function setParent(value: string) {
+  f.parent_id = value || null;
+  if (!f.parent_id) return;
+  const parent = app.snapshot.value.tasks.find((task) => task.id === f.parent_id);
+  if (parent && parent.project_id !== f.project_id) {
+    f.project_id = parent.project_id;
+    f.section_id = parent.section_id;
+  }
+}
 function close() {
   if (dirty.value) discard.value = true;
   else emit("close");
@@ -47,7 +107,7 @@ function close() {
 async function save() {
   if (
     await app.change({
-      type: "save",
+      type: "task_save",
       id: props.task?.id ?? null,
       draft: { ...f, start: f.start || null, end: f.end || null },
     })
@@ -55,37 +115,38 @@ async function save() {
     emit("close");
 }
 async function remove() {
-  if (props.task && (await app.change({ type: "delete", id: props.task.id })))
+  if (props.task && (await app.change({ type: "task_delete", id: props.task.id })))
     emit("close");
 }
 function preset(days: number) {
   f.start = app.state.day;
   f.end = days === 1 ? null : shiftDay(app.state.day, days - 1);
 }
-function keyboard(e: KeyboardEvent) {
-  if (e.key === "Escape") {
-    e.preventDefault();
+function keyboard(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
     close();
   }
-  if (e.key === "Tab") {
-    const dialog = e.currentTarget as HTMLElement;
+  if (event.key === "Tab") {
+    const dialog = event.currentTarget as HTMLElement;
     const focusable = Array.from(
       dialog.querySelectorAll<HTMLElement>(
         "button:not(:disabled),input:not(:disabled),select,textarea",
       ),
-    );
-    const first = focusable[0],
-      last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
+    ).filter((element) => !element.hasAttribute("disabled"));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
       last?.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
       first?.focus();
     }
   }
 }
 </script>
+
 <template>
   <div v-if="open" class="modal-backdrop">
     <section
@@ -116,6 +177,93 @@ function keyboard(e: KeyboardEvent) {
             :disabled="app.state.loading"
             autocomplete="off"
         /></label>
+
+        <div class="field-grid">
+          <label
+            >项目<select
+              :value="f.project_id ?? ''"
+              :disabled="app.state.loading"
+              @change="setProject(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">收件箱</option>
+              <option v-for="p in projects" :key="p.id" :value="p.id">
+                {{ p.name }}
+              </option>
+            </select></label
+          >
+          <label
+            >分区<select
+              :value="f.section_id ?? ''"
+              :disabled="app.state.loading || !sections.length"
+              @change="f.section_id = ($event.target as HTMLSelectElement).value || null"
+            >
+              <option value="">无分区</option>
+              <option v-for="s in sections" :key="s.id" :value="s.id">
+                {{ s.name }}
+              </option>
+            </select></label
+          >
+        </div>
+
+        <fieldset>
+          <legend>优先级</legend>
+          <div class="priority-row">
+            <label
+              v-for="p in [1, 2, 3, 4]"
+              :key="p"
+              class="priority-option"
+              :class="{ active: f.priority === p }"
+              :title="priorityTitle(p)"
+            >
+              <input
+                v-model.number="f.priority"
+                type="radio"
+                :value="p"
+                :aria-label="priorityTitle(p)"
+              />
+              <span
+                class="priority-dot"
+                :style="{ background: priorityColor(p) }"
+              />{{ priorityName(p) }}
+            </label>
+          </div>
+        </fieldset>
+
+        <label
+          >父事项<select
+            :value="f.parent_id ?? ''"
+            :disabled="app.state.loading"
+            @change="setParent(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">无（顶层事项）</option>
+            <option v-for="t in parentChoices" :key="t.id" :value="t.id">
+              {{ t.title }}
+            </option>
+          </select></label
+        >
+
+        <fieldset>
+          <legend>标签</legend>
+          <div class="chips">
+            <label
+              v-for="label in app.snapshot.value.labels"
+              :key="label.id"
+              class="chip-input"
+              :class="{ on: f.label_ids.includes(label.id) }"
+              :style="{ '--chip': label.color }"
+            >
+              <input
+                v-model="f.label_ids"
+                type="checkbox"
+                :value="label.id"
+              /><span>{{ label.name }}</span>
+            </label>
+            <small v-if="!app.snapshot.value.labels.length" class="muted"
+              >还没有标签，可在左侧「标签」里新建。</small
+            >
+          </div>
+        </fieldset>
+
         <fieldset>
           <legend>安排日期</legend>
           <div class="preset-row">
@@ -152,13 +300,7 @@ function keyboard(e: KeyboardEvent) {
             >结束日期留空表示单日；开始日期留空表示待安排。</small
           >
         </fieldset>
-        <label
-          >分类<input
-            v-model="f.category"
-            list="categories"
-            maxlength="40" /><datalist id="categories">
-            <option v-for="c in categories" :key="c" :value="c" /></datalist
-        ></label>
+
         <fieldset>
           <legend>事项颜色</legend>
           <div class="swatches">
@@ -177,19 +319,21 @@ function keyboard(e: KeyboardEvent) {
             >
           </div>
         </fieldset>
+
         <label
           >备注<textarea
             v-model="f.notes"
             maxlength="50000"
-            rows="5"
+            rows="4"
             placeholder="补充说明、想法或笔记…"
           />
         </label>
+
         <p v-if="app.state.error" class="error" role="alert">
           {{ app.state.error }}
         </p>
         <div v-if="deleting" class="confirmation" role="alert">
-          <span>确定删除这条事项？</span
+          <span>确定删除这条事项？子事项会一起删除。</span
           ><button
             type="button"
             class="danger"

@@ -4,7 +4,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { Mutation } from "./bindings/Mutation";
 import { onDay, sortTasks, today } from "./domain";
-const snapshot = ref<Snapshot>({ revision: 0, tasks: [] });
+const snapshot = ref<Snapshot>({
+  revision: 0,
+  projects: [],
+  sections: [],
+  labels: [],
+  tasks: [],
+});
 const state = reactive({
   day: today(),
   loading: false,
