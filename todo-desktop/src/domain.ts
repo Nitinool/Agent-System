@@ -61,6 +61,51 @@ export function onDay(t: Task, day: string): boolean {
   );
 }
 
+/** 事项在某一天是否出现：重复事项按规则与截止日，其余沿用日期范围 + 显式加减。 */
+export function occursOn(t: Task, day: string): boolean {
+  if (!t.recurrence) return onDay(t, day);
+  if (!t.start || day < t.start) return false;
+  if (t.repeat_until && day > t.repeat_until) return false;
+  if (t.excluded_days.includes(day)) return false;
+  return recurrenceMatches(t.start, t.recurrence, day);
+}
+
+/** 这一天是否已经勾掉（重复事项看当天的完成记录）。 */
+export function doneOn(t: Task, day: string): boolean {
+  if (t.completed) return true;
+  if (!t.recurrence) return false;
+  return t.completions.some((c) => c.due_date === day && !c.reopened_at);
+}
+
+/** 视图里要不要显示：当天该做，或者当天已经勾掉（勾掉后日期滚到下一次，但今天仍要看得见）。 */
+export function showsOn(t: Task, day: string): boolean {
+  return occursOn(t, day) || doneOn(t, day);
+}
+
+export function recurrenceStep(rule: string): number | null {
+  if (rule === "daily") return 1;
+  const matched = /^every:(\d+)$/.exec(rule);
+  if (!matched) return null;
+  const value = Number(matched[1]);
+  return value >= 1 && value <= 365 ? value : null;
+}
+
+export function recurrenceMatches(start: string, rule: string, day: string): boolean {
+  const step = recurrenceStep(rule);
+  if (!step) return false;
+  const gap = Math.round(
+    (Date.parse(day + "T12:00:00") - Date.parse(start + "T12:00:00")) / 86400000,
+  );
+  return gap >= 0 && gap % step === 0;
+}
+
+export function recurrenceLabel(rule: string | null): string {
+  if (!rule) return "不重复";
+  if (rule === "daily") return "每天";
+  const step = recurrenceStep(rule);
+  return step ? `每隔 ${step} 天` : "不重复";
+}
+
 /** 按标签筛选：没选任何标签时返回全部，否则只要命中其中任意一个。 */
 export function filterByLabels(items: readonly Task[], selected: readonly string[]) {
   if (!selected.length) return [...items];
@@ -96,11 +141,13 @@ export const bucketTitles: Record<Bucket, string> = {
 /** 一条事项只归一个时间桶：先看是否已过期，再按今天 / 明天 / 七天内 / 以后 / 待安排。 */
 export function bucketOf(t: Task, day: string): Bucket {
   if (!t.start && !t.end) return "none";
+  // 重复事项今天已经勾过、日期滚到明天了，但仍属于今天这一栏。
+  if (t.recurrence && doneOn(t, day)) return "today";
   const start = t.start ?? t.end ?? day;
   const end = t.end ?? start;
   if (end < day) return "overdue";
-  if (onDay(t, day)) return "today";
-  if (onDay(t, shiftDay(day, 1))) return "tomorrow";
+  if (showsOn(t, day)) return "today";
+  if (showsOn(t, shiftDay(day, 1))) return "tomorrow";
   if (start <= shiftDay(day, 7)) return "week";
   return "later";
 }
@@ -113,6 +160,8 @@ export function newDraft(day = today(), color = colors[0]): TaskDraft {
     priority: 4,
     start: day,
     end: null,
+    recurrence: null,
+    repeat_until: null,
     project_id: null,
     section_id: null,
     parent_id: null,

@@ -194,7 +194,7 @@ try {
   await expect(
     sticky.getByRole("button", { name: "取消置顶" }),
   ).toHaveAttribute("aria-pressed", "true");
-  await main.getByRole("button", { name: "月历布局" }).click();
+  await main.getByRole("button", { name: "月历布局", exact: true }).click();
   await expect(main.locator(".calendar")).toBeVisible();
   await main.screenshot({ path: join(profile, "calendar.png") });
   // Native WebView editor focus and default date, after selecting tomorrow.
@@ -210,7 +210,7 @@ try {
   );
   await main.getByRole("button", { name: "取消", exact: true }).click();
   await main.getByRole("button", { name: "放弃修改" }).click();
-  await main.getByRole("button", { name: "列表布局" }).click();
+  await main.getByRole("button", { name: "列表布局", exact: true }).click();
   await main.locator(".sidebar").getByRole("button", { name: "今天" }).click();
   await main.getByRole("button", { name: "移出今天 独立应用联动事项" }).click();
   await expect(
@@ -311,9 +311,9 @@ try {
   await main.locator(".sidebar").getByRole("button", { name: "所有事项" }).click();
 
   // 布局切换：月历 / 七天 / 列表
-  await main.getByRole("button", { name: "月历布局" }).click();
+  await main.getByRole("button", { name: "月历布局", exact: true }).click();
   await expect(main.locator(".calendar")).toBeVisible();
-  await main.getByRole("button", { name: "七天布局" }).click();
+  await main.getByRole("button", { name: "七天布局", exact: true }).click();
   await expect(main.locator(".week-grid .week-column")).toHaveCount(7);
   // 在七天的某一天直接新增，开始日期应落在那一天
   await main.getByRole("button", { name: "在 " + tomorrow + " 新增事项" }).click();
@@ -335,9 +335,30 @@ try {
     main.locator(".week-task").filter({ hasText: "拆解步骤" }),
   ).toBeVisible();
 
-  await main.getByRole("button", { name: "列表布局" }).click();
+  await main.getByRole("button", { name: "列表布局", exact: true }).click();
   await expect(main.locator(".calendar")).toHaveCount(0);
   await expect(main.locator(".week-grid")).toHaveCount(0);
+
+  // 重复事项：每天，七天布局铺满，勾完滚到下一次
+  await main.getByRole("button", { name: "新增事项", exact: true }).click();
+  await main.getByLabel("事项名称", { exact: true }).fill("每日复习");
+  await main.getByLabel("重复", { exact: true }).selectOption("daily");
+  await main.getByRole("button", { name: "保存", exact: true }).click();
+  snap = await ipc(main, "snapshot");
+  const daily = findTask(snap, "每日复习");
+  expect(daily.recurrence).toBe("daily");
+  await main.locator(".sidebar").getByRole("button", { name: "所有事项" }).click();
+  await main.getByRole("button", { name: "七天布局", exact: true }).click();
+  await expect(main.locator(".week-task").filter({ hasText: "每日复习" })).toHaveCount(7);
+
+  await main.locator(".sidebar").getByRole("button", { name: "今天" }).click();
+  await main.getByRole("checkbox", { name: "完成 每日复习" }).check();
+  snap = await ipc(main, "snapshot");
+  const rolled = findTask(snap, "每日复习");
+  expect(rolled.completed).toBe(false);
+  expect(rolled.completions).toHaveLength(1);
+  expect(rolled.completions[0].due_date).toBe(day);
+  expect(rolled.start).toBe(tomorrow);
 
   expect(errors).toEqual([]);
   console.log(
@@ -365,6 +386,8 @@ try {
           "layout-switch",
           "week-layout",
           "label-filter",
+          "recurrence-daily",
+          "recurrence-roll",
         ],
         errors,
       },

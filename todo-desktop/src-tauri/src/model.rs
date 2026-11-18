@@ -6,6 +6,8 @@ use ts_rs::TS;
 pub struct Completion {
     pub completed_at: String,
     pub reopened_at: Option<String>,
+    /// 这一条完成记录对应的是哪一天的重复实例；非重复事项为 null。
+    pub due_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -59,6 +61,10 @@ pub struct Task {
     pub priority: u8,
     pub start: Option<String>,
     pub end: Option<String>,
+    /// 重复规则：`daily` 或 `every:N`；空表示不重复。
+    pub recurrence: Option<String>,
+    /// 重复到哪一天为止；空表示一直重复。
+    pub repeat_until: Option<String>,
     pub position: i32,
     pub completed: bool,
     pub completions: Vec<Completion>,
@@ -78,6 +84,8 @@ pub struct TaskDraft {
     pub priority: u8,
     pub start: Option<String>,
     pub end: Option<String>,
+    pub recurrence: Option<String>,
+    pub repeat_until: Option<String>,
     pub project_id: Option<String>,
     pub section_id: Option<String>,
     pub parent_id: Option<String>,

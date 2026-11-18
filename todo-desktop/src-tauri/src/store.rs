@@ -47,6 +47,70 @@ pub fn on_day(task: &Task, day: &str) -> bool {
                 .is_some_and(|s| s <= day && day <= task.end.as_deref().unwrap_or(s)))
 }
 
+/// 事项在某一天是否出现：重复事项只看规则与截止日，其余沿用日期范围 + 显式加减。
+pub fn occurs_on(task: &Task, day: &str) -> bool {
+    match &task.recurrence {
+        None => on_day(task, day),
+        Some(rule) => {
+            let Some(start) = task.start.as_deref() else {
+                return false;
+            };
+            if day < start {
+                return false;
+            }
+            if let Some(until) = task.repeat_until.as_deref() {
+                if day > until {
+                    return false;
+                }
+            }
+            if task.excluded_days.iter().any(|d| d == day) {
+                return false;
+            }
+            recurrence_matches(start, rule, day)
+        }
+    }
+}
+
+/// 规则是否命中某天。`daily` 每天一次；`every:N` 从开始日期起每 N 天一次。
+pub fn recurrence_matches(start: &str, rule: &str, day: &str) -> bool {
+    let Some(step) = recurrence_step(rule) else {
+        return false;
+    };
+    match (NaiveDate::parse_from_str(start, "%Y-%m-%d"), NaiveDate::parse_from_str(day, "%Y-%m-%d")) {
+        (Ok(start), Ok(day)) => {
+            let gap = (day - start).num_days();
+            gap >= 0 && gap % step as i64 == 0
+        }
+        _ => false,
+    }
+}
+
+pub fn recurrence_step(rule: &str) -> Option<u32> {
+    if rule == "daily" {
+        return Some(1);
+    }
+    rule.strip_prefix("every:")
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| (1..=365).contains(value))
+}
+
+/// 从 `start` 出发、严格晚于 `after` 的下一次日期；用来在完成后把到期日往前滚。
+pub fn next_occurrence(start: &str, rule: &str, after: &str) -> Option<String> {
+    let step = recurrence_step(rule)? as i64;
+    let start = NaiveDate::parse_from_str(start, "%Y-%m-%d").ok()?;
+    let after = NaiveDate::parse_from_str(after, "%Y-%m-%d").ok()?;
+    if start > after {
+        return Some(start.format("%Y-%m-%d").to_string());
+    }
+    let gap = (after - start).num_days();
+    let mut index = gap / step;
+    if start + chrono::Duration::days(index * step) <= after {
+        index += 1;
+    }
+    let next = start + chrono::Duration::days(index * step);
+    Some(next.format("%Y-%m-%d").to_string())
+}
+
 fn row_to_task(r: &Row<'_>) -> rusqlite::Result<Task> {
     Ok(Task {
         id: r.get(0)?,
@@ -59,18 +123,20 @@ fn row_to_task(r: &Row<'_>) -> rusqlite::Result<Task> {
         priority: r.get(7)?,
         start: r.get(8)?,
         end: r.get(9)?,
-        position: r.get(10)?,
-        completed: r.get(11)?,
+        recurrence: r.get(10)?,
+        repeat_until: r.get(11)?,
+        position: r.get(12)?,
+        completed: r.get(13)?,
         completions: Vec::new(),
         included_days: Vec::new(),
         excluded_days: Vec::new(),
         label_ids: Vec::new(),
-        created_at: r.get(12)?,
-        updated_at: r.get(13)?,
+        created_at: r.get(14)?,
+        updated_at: r.get(15)?,
     })
 }
 
-const TASK_COLUMNS: &str = "id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,position,completed,created_at,updated_at";
+const TASK_COLUMNS: &str = "id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,recurrence,repeat_until,position,completed,created_at,updated_at";
 
 fn load_task(conn: &Connection, id: &str) -> Result<Option<Task>> {
     let sql = format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?1");
@@ -82,13 +148,14 @@ fn load_task(conn: &Connection, id: &str) -> Result<Option<Task>> {
         .query_map([id], |r| r.get(0))?
         .collect::<std::result::Result<Vec<String>, _>>()?;
     let mut statement = conn.prepare(
-        "SELECT completed_at,reopened_at FROM task_completions WHERE task_id=?1 ORDER BY id",
+        "SELECT completed_at,reopened_at,due_date FROM task_completions WHERE task_id=?1 ORDER BY id",
     )?;
     task.completions = statement
         .query_map([id], |r| {
             Ok(Completion {
                 completed_at: r.get(0)?,
                 reopened_at: r.get(1)?,
+                due_date: r.get(2)?,
             })
         })?
         .collect::<std::result::Result<Vec<Completion>, _>>()?;
@@ -169,6 +236,28 @@ fn validate_task(conn: &Connection, id: Option<&str>, draft: &mut TaskDraft) -> 
     if let (Some(start), Some(end)) = (&draft.start, &draft.end) {
         ensure(end >= start, "结束日期不能早于开始日期。")?;
     }
+    match &draft.recurrence {
+        Some(rule) => {
+            ensure(
+                recurrence_step(rule).is_some(),
+                "重复规则无效，请选择每天或每隔几天。",
+            )?;
+            ensure(draft.start.is_some(), "重复事项必须先有开始日期。")?;
+            ensure(
+                draft.end.is_none(),
+                "重复事项不用结束日期，请改用“重复截止”。",
+            )?;
+            if let Some(until) = &draft.repeat_until {
+                date(until)?;
+                let start = draft.start.as_deref().unwrap_or_default();
+                ensure(until.as_str() >= start, "重复截止不能早于开始日期。")?;
+            }
+        }
+        None => ensure(
+            draft.repeat_until.is_none(),
+            "只有重复事项才能设置重复截止。",
+        )?,
+    }
     draft.label_ids.sort();
     draft.label_ids.dedup();
     for label in &draft.label_ids {
@@ -244,9 +333,9 @@ fn save_task(
         }
     }
     conn.execute(
-        "INSERT INTO tasks(id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,position,completed,created_at,updated_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
-         ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,section_id=excluded.section_id,parent_id=excluded.parent_id,title=excluded.title,notes=excluded.notes,color=excluded.color,priority=excluded.priority,start_date=excluded.start_date,end_date=excluded.end_date,updated_at=excluded.updated_at",
+        "INSERT INTO tasks(id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,recurrence,repeat_until,position,completed,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+         ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,section_id=excluded.section_id,parent_id=excluded.parent_id,title=excluded.title,notes=excluded.notes,color=excluded.color,priority=excluded.priority,start_date=excluded.start_date,end_date=excluded.end_date,recurrence=excluded.recurrence,repeat_until=excluded.repeat_until,updated_at=excluded.updated_at",
         params![
             task_id,
             draft.project_id,
@@ -258,6 +347,8 @@ fn save_task(
             draft.priority,
             draft.start,
             draft.end,
+            draft.recurrence,
+            draft.repeat_until,
             position,
             existing.as_ref().is_some_and(|task| task.completed),
             created_at,
@@ -280,11 +371,16 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        ensure(version <= 2, "资料来自更高版本，请更新应用；未修改数据。")?;
+        ensure(version <= 3, "资料来自更高版本，请更新应用；未修改数据。")?;
         match version {
             0 => migrate::create(&conn)?,
             1 => {
                 migrate::upgrade_from_1(&mut conn, path)?;
+                migrate::upgrade_2_to_3(&mut conn)?;
+            }
+            2 => {
+                migrate::backup_now(&conn, path)?;
+                migrate::upgrade_2_to_3(&mut conn)?;
             }
             _ => {}
         }
@@ -370,7 +466,7 @@ impl Store {
             }
         }
         let mut statement = self.conn.prepare(
-            "SELECT task_id,completed_at,reopened_at FROM task_completions ORDER BY task_id,id",
+            "SELECT task_id,completed_at,reopened_at,due_date FROM task_completions ORDER BY task_id,id",
         )?;
         for row in statement.query_map([], |r| {
             Ok((
@@ -378,6 +474,7 @@ impl Store {
                 Completion {
                     completed_at: r.get(1)?,
                     reopened_at: r.get(2)?,
+                    due_date: r.get(3)?,
                 },
             ))
         })? {
@@ -599,6 +696,9 @@ impl Store {
 
 fn complete_task(conn: &Connection, id: &str, completed: bool, now: &str) -> Result<()> {
     let task = load_task(conn, id)?.ok_or_else(|| AppError::new("missing", "事项已被删除。"))?;
+    if task.recurrence.is_some() {
+        return complete_occurrence(conn, &task, completed, now);
+    }
     if completed && !task.completed {
         conn.execute(
             "INSERT INTO task_completions(task_id,completed_at,reopened_at) VALUES(?1,?2,NULL)",
@@ -615,6 +715,83 @@ fn complete_task(conn: &Connection, id: &str, completed: bool, now: &str) -> Res
         "UPDATE tasks SET completed=?2,updated_at=?3 WHERE id=?1",
         params![id, completed, now],
     )?;
+    Ok(())
+}
+
+/// 重复事项的勾选：写一条带 due_date 的完成记录，然后把开始日期滚到下一次。
+/// 撤销则把最近一条未撤销的记录标回 reopened，并把日期搬回那一天。
+fn complete_occurrence(conn: &Connection, task: &Task, completed: bool, now: &str) -> Result<()> {
+    let rule = task.recurrence.as_deref().unwrap_or("daily");
+    if completed {
+        let due = task
+            .start
+            .clone()
+            .ok_or_else(|| AppError::new("validation", "重复事项缺少开始日期。"))?;
+        let already: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM task_completions WHERE task_id=?1 AND due_date=?2 AND reopened_at IS NULL",
+                params![task.id, due],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if already.is_none() {
+            conn.execute(
+                "INSERT INTO task_completions(task_id,completed_at,reopened_at,due_date) VALUES(?1,?2,NULL,?3)",
+                params![task.id, now, due],
+            )?;
+        }
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        if let Some(next) = next_occurrence(&due, rule, &today) {
+            if task
+                .repeat_until
+                .as_deref()
+                .is_some_and(|until| next.as_str() > until)
+            {
+                // 已经越过重复截止，整条事项收尾。
+                conn.execute(
+                    "UPDATE tasks SET completed=1,updated_at=?2 WHERE id=?1",
+                    params![task.id, now],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE tasks SET start_date=?2,completed=0,updated_at=?3 WHERE id=?1",
+                    params![task.id, next, now],
+                )?;
+                conn.execute(
+                    "DELETE FROM task_days WHERE task_id=?1 AND included=0",
+                    [&task.id],
+                )?;
+            }
+        }
+        return Ok(());
+    }
+    let last: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT id,due_date FROM task_completions WHERE task_id=?1 AND reopened_at IS NULL AND due_date IS NOT NULL ORDER BY id DESC LIMIT 1",
+            [&task.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match last {
+        Some((completion_id, due)) => {
+            conn.execute(
+                "UPDATE task_completions SET reopened_at=?2 WHERE id=?1",
+                params![completion_id, now],
+            )?;
+            if let Some(due) = due {
+                conn.execute(
+                    "UPDATE tasks SET start_date=?2,completed=0,updated_at=?3 WHERE id=?1",
+                    params![task.id, due, now],
+                )?;
+            }
+        }
+        None => {
+            conn.execute(
+                "UPDATE tasks SET completed=0,updated_at=?2 WHERE id=?1",
+                params![task.id, now],
+            )?;
+        }
+    }
     Ok(())
 }
 

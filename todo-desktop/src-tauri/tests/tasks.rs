@@ -1,13 +1,19 @@
 use task_notes::{
     directory::checked_directory,
     model::*,
-    store::{on_day, Store},
+    store::{next_occurrence, occurs_on, on_day, recurrence_matches, Store},
 };
 
 fn temporary() -> tempfile::TempDir {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
     std::fs::create_dir_all(&root).unwrap();
     tempfile::tempdir_in(root).unwrap()
+}
+
+fn day(offset: i64) -> String {
+    (chrono::Local::now().date_naive() + chrono::Duration::days(offset))
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn draft(start: Option<&str>, end: Option<&str>) -> TaskDraft {
@@ -18,6 +24,8 @@ fn draft(start: Option<&str>, end: Option<&str>) -> TaskDraft {
         priority: 4,
         start: start.map(Into::into),
         end: end.map(Into::into),
+        recurrence: None,
+        repeat_until: None,
         project_id: None,
         section_id: None,
         parent_id: None,
@@ -535,4 +543,130 @@ fn upgrading_schema_one_keeps_tasks_days_history_and_backs_up() {
             .count(),
         1
     );
+}
+
+#[test]
+fn recurrence_rules_match_days_and_produce_next_occurrence() {
+    assert!(recurrence_matches("2026-11-18", "daily", "2026-11-18"));
+    assert!(recurrence_matches("2026-11-18", "daily", "2026-11-25"));
+    assert!(!recurrence_matches("2026-11-18", "every:3", "2026-11-19"));
+    assert!(recurrence_matches("2026-11-18", "every:3", "2026-11-21"));
+    assert!(recurrence_matches("2026-11-18", "every:3", "2026-11-24"));
+    assert!(!recurrence_matches("2026-11-18", "every:3", "2026-11-17"));
+    assert_eq!(
+        next_occurrence("2026-11-18", "daily", "2026-11-18").as_deref(),
+        Some("2026-11-19")
+    );
+    assert_eq!(
+        next_occurrence("2026-11-18", "every:3", "2026-11-18").as_deref(),
+        Some("2026-11-21")
+    );
+    let today = day(0);
+    let next = next_occurrence("2020-01-01", "every:2", &today).unwrap();
+    assert!(next.as_str() > today.as_str());
+}
+
+#[test]
+fn recurring_task_rolls_to_next_occurrence_and_keeps_due_date_history() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+    let yesterday = day(-1);
+    let tomorrow = day(1);
+    let mut d = draft(Some(&yesterday), None);
+    d.title = "每日复习".into();
+    d.recurrence = Some("daily".into());
+    let snap = s
+        .mutate(Mutation::TaskSave { id: None, draft: d }, 0)
+        .unwrap();
+    let id = snap.tasks[0].id.clone();
+    assert!(occurs_on(&snap.tasks[0], &yesterday));
+    assert!(occurs_on(&snap.tasks[0], &day(3)));
+
+    let snap = s
+        .mutate(
+            Mutation::TaskComplete {
+                id: id.clone(),
+                completed: true,
+            },
+            snap.revision,
+        )
+        .unwrap();
+    let task = &snap.tasks[0];
+    assert!(!task.completed);
+    assert_eq!(task.completions.len(), 1);
+    assert_eq!(
+        task.completions[0].due_date.as_deref(),
+        Some(yesterday.as_str())
+    );
+    assert_eq!(task.start.as_deref(), Some(tomorrow.as_str()));
+
+    let snap = s
+        .mutate(
+            Mutation::TaskComplete {
+                id: id.clone(),
+                completed: false,
+            },
+            snap.revision,
+        )
+        .unwrap();
+    let task = &snap.tasks[0];
+    assert!(task.completions[0].reopened_at.is_some());
+    assert_eq!(task.start.as_deref(), Some(yesterday.as_str()));
+}
+
+#[test]
+fn recurring_task_stops_after_repeat_until() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+    let yesterday = day(-1);
+    let mut d = draft(Some(&yesterday), None);
+    d.title = "最后一次".into();
+    d.recurrence = Some("daily".into());
+    d.repeat_until = Some(yesterday.clone());
+    let snap = s
+        .mutate(Mutation::TaskSave { id: None, draft: d }, 0)
+        .unwrap();
+    let id = snap.tasks[0].id.clone();
+    let snap = s
+        .mutate(
+            Mutation::TaskComplete {
+                id,
+                completed: true,
+            },
+            snap.revision,
+        )
+        .unwrap();
+    assert!(snap.tasks[0].completed);
+    assert_eq!(snap.tasks[0].start.as_deref(), Some(yesterday.as_str()));
+}
+
+#[test]
+fn recurrence_validation_rejects_contradictory_dates() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+
+    let mut with_end = draft(Some("2026-11-18"), Some("2026-11-20"));
+    with_end.recurrence = Some("daily".into());
+    assert!(s
+        .mutate(Mutation::TaskSave { id: None, draft: with_end }, 0)
+        .is_err());
+
+    let mut bad_rule = draft(Some("2026-11-18"), None);
+    bad_rule.recurrence = Some("weekly".into());
+    assert!(s
+        .mutate(Mutation::TaskSave { id: None, draft: bad_rule }, 0)
+        .is_err());
+
+    let mut bad_until = draft(Some("2026-11-18"), None);
+    bad_until.recurrence = Some("daily".into());
+    bad_until.repeat_until = Some("2026-11-01".into());
+    assert!(s
+        .mutate(Mutation::TaskSave { id: None, draft: bad_until }, 0)
+        .is_err());
+
+    let mut until_without_rule = draft(Some("2026-11-18"), None);
+    until_without_rule.repeat_until = Some("2026-11-30".into());
+    assert!(s
+        .mutate(Mutation::TaskSave { id: None, draft: until_without_rule }, 0)
+        .is_err());
 }

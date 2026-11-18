@@ -13,4 +13,12 @@ parent_id: string | null, title: string, notes: string, color: string,
 /**
  * 1 = 最高，4 = 无优先级（与 Todoist 的 p1–p4 一致）。
  */
-priority: number, start: string | null, end: string | null, position: number, completed: boolean, completions: Array<Completion>, included_days: Array<string>, excluded_days: Array<string>, label_ids: Array<string>, created_at: string, updated_at: string, };
+priority: number, start: string | null, end: string | null, 
+/**
+ * 重复规则：`daily` 或 `every:N`；空表示不重复。
+ */
+recurrence: string | null, 
+/**
+ * 重复到哪一天为止；空表示一直重复。
+ */
+repeat_until: string | null, position: number, completed: boolean, completions: Array<Completion>, included_days: Array<string>, excluded_days: Array<string>, label_ids: Array<string>, created_at: string, updated_at: string, };

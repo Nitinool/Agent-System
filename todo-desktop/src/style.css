@@ -437,6 +437,24 @@ legend {
 .preset-row button {
   font-size: 12px;
 }
+.repeat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 8px 0 7px;
+  flex-wrap: wrap;
+}
+.repeat-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #6f7d91;
+}
+.repeat-row select,
+.repeat-row input {
+  min-width: 110px;
+}
 .swatches {
   display: flex;
   gap: 12px;

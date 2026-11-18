@@ -19,12 +19,13 @@ import {
   bucketOrder,
   bucketTitles,
   dayLabel,
+  doneOn,
   filterByLabels,
   monthCells,
-  onDay,
   priorityColor,
   shiftDay,
   shortDay,
+  showsOn,
   sortBucket,
   weekdayShort,
 } from "./domain";
@@ -82,11 +83,11 @@ const currentLabel = computed(
 );
 const allCount = computed(() => tasks.value.filter((task) => !task.completed).length);
 const todayCount = computed(
-  () => tasks.value.filter((task) => onDay(task, app.state.day) && !task.completed).length,
+  () => tasks.value.filter((task) => showsOn(task, app.state.day) && !doneOn(task, app.state.day)).length,
 );
 
 const scoped = computed<Task[]>(() => {
-  if (view.value === "today") return tasks.value.filter((task) => onDay(task, app.state.day));
+  if (view.value === "today") return tasks.value.filter((task) => showsOn(task, app.state.day));
   if (view.value === "label")
     return tasks.value.filter((task) => task.label_ids.includes(labelId.value ?? ""));
   return tasks.value;
@@ -143,12 +144,12 @@ const calendar = computed(
     new Map(
       monthCells(month.value).map((day) => [
         day,
-        layoutTasks.value.filter((task) => onDay(task, day)),
+        layoutTasks.value.filter((task) => showsOn(task, day)),
       ]),
     ),
 );
 const selectedDayTasks = computed(() =>
-  layoutTasks.value.filter((task) => onDay(task, selected.value)),
+  layoutTasks.value.filter((task) => showsOn(task, selected.value)),
 );
 const weekDays = computed(() =>
   Array.from({ length: 7 }, (_, index) =>
@@ -164,7 +165,7 @@ const weekTasks = computed(
     new Map(
       weekDays.value.map((day) => [
         day,
-        layoutTasks.value.filter((task) => onDay(task, day)),
+        layoutTasks.value.filter((task) => showsOn(task, day)),
       ]),
     ),
 );
@@ -335,7 +336,7 @@ onUnmounted(app.stop);
         {{ app.state.error }} <button @click="app.refresh()">重试读取</button>
       </div>
 
-      <template v-if="layout === 'calendar'">
+      <template v-if="layout === 'calendar' && view !== 'today'">
         <div class="toolbar">
           <button aria-label="上个月" @click="move(-1)">
             <ChevronLeft :size="16" /></button
@@ -412,7 +413,7 @@ onUnmounted(app.stop);
         </section>
       </template>
 
-      <template v-else-if="layout === 'week'">
+      <template v-else-if="layout === 'week' && view !== 'today'">
         <div class="toolbar">
           <button aria-label="上一周" @click="weekOffset -= 7">
             <ChevronLeft :size="16" /></button

@@ -126,13 +126,35 @@ fn backup(conn: &Connection, database: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// 新建资料：直接建 schema 2。
+/// schema 2 → 3：重复规则与完成记录对应的日期，纯加列，不改写已有数据。
+pub const V3: &str = "
+ALTER TABLE tasks ADD COLUMN recurrence TEXT;
+ALTER TABLE tasks ADD COLUMN repeat_until TEXT;
+ALTER TABLE task_completions ADD COLUMN due_date TEXT;
+";
+
+/// 新建资料：直接建 schema 3。
 pub fn create(conn: &Connection) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(SCHEMA)?;
-    tx.execute_batch("PRAGMA user_version=2;")?;
+    tx.execute_batch(V3)?;
+    tx.execute_batch("PRAGMA user_version=3;")?;
     tx.commit()?;
     Ok(())
+}
+
+/// 2 → 3，加列即可，失败回滚。
+pub fn upgrade_2_to_3(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(V3)?;
+    tx.execute_batch("PRAGMA user_version=3;")?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// 升级前备份；调用方决定是否需要。
+pub fn backup_now(conn: &Connection, database: &Path) -> Result<PathBuf> {
+    backup(conn, database)
 }
 
 /// schema 1 → 2。先备份，再在一个事务里改名旧表、建新表、逐条搬运；任何一步失败都回滚。

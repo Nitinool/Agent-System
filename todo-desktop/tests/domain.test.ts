@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   bucketOf,
   dayLabel,
+  doneOn,
   filterByLabels,
   monthCells,
   newDraft,
+  occursOn,
   onDay,
   orderedTree,
   parentOptions,
   shiftDay,
+  showsOn,
   sortBucket,
   sortTasks,
   today,
@@ -134,6 +137,59 @@ describe("标签筛选", () => {
       "d",
     ]);
     expect(filterByLabels([a, b, c, both], ["z"])).toEqual([]);
+  });
+});
+
+describe("重复事项", () => {
+  it("每天：开始日期起每天命中，重复截止之后不再命中", () => {
+    const t = task({ start: "2026-11-18", end: null, recurrence: "daily" });
+    expect(occursOn(t, "2026-11-17")).toBe(false);
+    expect(occursOn(t, "2026-11-18")).toBe(true);
+    expect(occursOn(t, "2026-12-31")).toBe(true);
+    expect(occursOn({ ...t, repeat_until: "2026-11-20" }, "2026-11-20")).toBe(true);
+    expect(occursOn({ ...t, repeat_until: "2026-11-20" }, "2026-11-21")).toBe(false);
+  });
+
+  it("每隔三天：只看与锚点对齐的日子", () => {
+    const t = task({ start: "2026-11-18", end: null, recurrence: "every:3" });
+    expect(occursOn(t, "2026-11-19")).toBe(false);
+    expect(occursOn(t, "2026-11-21")).toBe(true);
+    expect(occursOn(t, "2026-11-24")).toBe(true);
+  });
+
+  it("勾完当天后日期已滚到下一次，但当天仍显示为已完成", () => {
+    const rolled = task({
+      start: "2026-11-19",
+      recurrence: "daily",
+      completions: [
+        {
+          completed_at: "2026-11-18T09:00:00+08:00",
+          reopened_at: null,
+          due_date: "2026-11-18",
+        },
+      ],
+    });
+    expect(occursOn(rolled, "2026-11-18")).toBe(false);
+    expect(doneOn(rolled, "2026-11-18")).toBe(true);
+    expect(showsOn(rolled, "2026-11-18")).toBe(true);
+    expect(doneOn(rolled, "2026-11-19")).toBe(false);
+    expect(showsOn(rolled, "2026-11-19")).toBe(true);
+    expect(bucketOf(rolled, "2026-11-18")).toBe("today");
+  });
+
+  it("撤销过的完成记录不再算完成", () => {
+    const reopened = task({
+      start: "2026-11-18",
+      recurrence: "daily",
+      completions: [
+        {
+          completed_at: "2026-11-18T09:00:00+08:00",
+          reopened_at: "2026-11-18T10:00:00+08:00",
+          due_date: "2026-11-18",
+        },
+      ],
+    });
+    expect(doneOn(reopened, "2026-11-18")).toBe(false);
   });
 });
 

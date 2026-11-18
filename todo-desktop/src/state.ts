@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { Mutation } from "./bindings/Mutation";
-import { onDay, sortTasks, today } from "./domain";
+import { showsOn, sortTasks, today } from "./domain";
 const snapshot = ref<Snapshot>({
   revision: 0,
   projects: [],
@@ -18,7 +18,7 @@ const state = reactive({
   error: "",
 });
 const todayTasks = computed(() =>
-  sortTasks(snapshot.value.tasks.filter((t) => onDay(t, state.day))),
+  sortTasks(snapshot.value.tasks.filter((t) => showsOn(t, state.day))),
 );
 let release: UnlistenFn | undefined;
 let timer: ReturnType<typeof setInterval> | undefined;

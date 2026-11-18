@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import type { Task } from "../bindings/Task";
 import { app } from "../state";
 import {
+  doneOn,
   onDay,
   orderedTree,
   priorityColor,
@@ -89,13 +90,13 @@ function drop(target: string) {
       <input
         type="checkbox"
         :aria-label="'完成 ' + row.task.title"
-        :checked="row.task.completed"
+        :checked="doneOn(row.task, app.state.day)"
         :disabled="app.state.loading || !app.state.ready"
         @change="
           app.change({
             type: 'task_complete',
             id: row.task.id,
-            completed: !row.task.completed,
+            completed: !doneOn(row.task, app.state.day),
           })
         "
       />
@@ -119,7 +120,7 @@ function drop(target: string) {
         </span>
       </button>
       <button
-        v-if="!todayActions && !compact && !onDay(row.task, app.state.day)"
+        v-if="!row.task.recurrence && !todayActions && !compact && !onDay(row.task, app.state.day)"
         class="quiet"
         :disabled="app.state.loading"
         :aria-label="'加入今天 ' + row.task.title"
@@ -135,7 +136,7 @@ function drop(target: string) {
         加入今天
       </button>
       <button
-        v-if="todayActions && !compact"
+        v-if="!row.task.recurrence && todayActions && !compact"
         class="quiet"
         :disabled="app.state.loading"
         :aria-label="'移出今天 ' + row.task.title"

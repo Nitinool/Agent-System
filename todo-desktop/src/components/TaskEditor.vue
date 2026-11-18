@@ -106,7 +106,32 @@ async function remove() {
 }
 function preset(days: number) {
   f.start = app.state.day;
-  f.end = days === 1 ? null : shiftDay(app.state.day, days - 1);
+  f.end = f.recurrence || days === 1 ? null : shiftDay(app.state.day, days - 1);
+}
+const recurrenceKind = computed<"none" | "daily" | "every">(() =>
+  !f.recurrence ? "none" : f.recurrence === "daily" ? "daily" : "every",
+);
+const everyN = ref(2);
+watch(
+  () => f.recurrence,
+  (rule) => {
+    if (rule?.startsWith("every:")) everyN.value = Number(rule.slice(6)) || 2;
+  },
+);
+function setRecurrenceKind(value: string) {
+  if (value === "none") {
+    f.recurrence = null;
+    f.repeat_until = null;
+    return;
+  }
+  if (!f.start) f.start = app.state.day;
+  f.end = null;
+  f.recurrence = value === "daily" ? "daily" : `every:${everyN.value}`;
+}
+function setEveryN(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value);
+  everyN.value = Math.min(365, Math.max(1, Math.round(value) || 2));
+  if (f.recurrence) f.recurrence = `every:${everyN.value}`;
 }
 function keyboard(event: KeyboardEvent) {
   if (event.key === "Escape") {
@@ -246,18 +271,52 @@ function keyboard(event: KeyboardEvent) {
                 type="date"
                 aria-label="开始日期"
                 v-model="f.start" /></label
-            ><span>至</span
-            ><label
-              >结束日期<input
+            ><template v-if="!f.recurrence"
+              ><span>至</span
+              ><label
+                >结束日期<input
+                  type="date"
+                  aria-label="结束日期"
+                  v-model="f.end"
+                  :min="f.start || undefined"
+              /></label></template
+            >
+          </div>
+          <div class="repeat-row">
+            <label
+              >重复<select
+                aria-label="重复"
+                :value="recurrenceKind"
+                :disabled="app.state.loading"
+                @change="setRecurrenceKind(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="none">不重复</option>
+                <option value="daily">每天</option>
+                <option value="every">每隔 N 天</option>
+              </select></label
+            >
+            <label v-if="recurrenceKind === 'every'"
+              >间隔天数<input
+                type="number"
+                min="1"
+                max="365"
+                aria-label="间隔天数"
+                :value="everyN"
+                @change="setEveryN" /></label
+            >
+            <label v-if="f.recurrence"
+              >重复截止<input
                 type="date"
-                aria-label="结束日期"
-                v-model="f.end"
+                aria-label="重复截止"
+                v-model="f.repeat_until"
                 :min="f.start || undefined"
             /></label>
           </div>
-          <small class="muted"
-            >结束日期留空表示单日；开始日期留空表示待安排。</small
-          >
+          <small class="muted">{{
+            f.recurrence
+              ? "重复事项只留一条，勾完自动滚到下一次；重复截止留空表示一直重复。"
+              : "结束日期留空表示单日；开始日期留空表示待安排。"
+          }}</small>
         </fieldset>
 
         <fieldset>
