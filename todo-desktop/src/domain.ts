@@ -61,6 +61,13 @@ export function onDay(t: Task, day: string): boolean {
   );
 }
 
+/** 按标签筛选：没选任何标签时返回全部，否则只要命中其中任意一个。 */
+export function filterByLabels(items: readonly Task[], selected: readonly string[]) {
+  if (!selected.length) return [...items];
+  const wanted = new Set(selected);
+  return items.filter((task) => task.label_ids.some((id) => wanted.has(id)));
+}
+
 /** 时间分组内部：按开始日期排，无日期的沉底，同日期保持手动顺序。 */
 export function sortBucket(items: readonly Task[]) {
   return [...items].sort(

@@ -812,6 +812,36 @@ legend {
   color: #526174;
   font-variant-numeric: tabular-nums;
 }
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+.filter-title {
+  font-size: 11px;
+  color: #8b98aa;
+  margin-right: 2px;
+}
+.filter-chip {
+  border: 1px solid #dce1e8;
+  background: #fff;
+  color: #526174;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  min-height: 26px;
+}
+.filter-chip:hover {
+  background: #eef3fc;
+}
+.filter-chip.on {
+  border-color: var(--chip);
+  color: var(--chip);
+  background: #f8fafc;
+  font-weight: 600;
+}
 .week-panel {
   overflow: hidden;
 }

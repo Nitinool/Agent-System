@@ -323,6 +323,18 @@ try {
   await expect(
     main.locator(".week-task").filter({ hasText: "七天布局新增" }),
   ).toBeVisible();
+
+  // 周布局按标签筛选：勾「紧急」只留带该标签的事项，取消后恢复
+  await main.locator(".filter-chip").filter({ hasText: "紧急" }).click();
+  await expect(
+    main.locator(".week-task").filter({ hasText: "拆解步骤" }),
+  ).toHaveCount(0);
+  await expect(main.locator(".week-task").filter({ hasText: "写方案" })).toBeVisible();
+  await main.getByRole("button", { name: "显示全部" }).click();
+  await expect(
+    main.locator(".week-task").filter({ hasText: "拆解步骤" }),
+  ).toBeVisible();
+
   await main.getByRole("button", { name: "列表布局" }).click();
   await expect(main.locator(".calendar")).toHaveCount(0);
   await expect(main.locator(".week-grid")).toHaveCount(0);
@@ -352,6 +364,7 @@ try {
           "time-buckets",
           "layout-switch",
           "week-layout",
+          "label-filter",
         ],
         errors,
       },

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bucketOf,
   dayLabel,
+  filterByLabels,
   monthCells,
   newDraft,
   onDay,
@@ -95,8 +96,7 @@ describe("所有事项的时间分组", () => {
     expect(bucketOf(moved, day)).not.toBe("today");
   });
 
-  it("同一个桶里按开始日期排，无日期的沉底，同日期保持手动顺序", () => {
-    const list = [
+  it("同一个桶里按开始日期排，无日期的沉底，同日期保持手动顺序", () => {    const list = [
       task({ id: "none", start: null, position: 1 }),
       task({ id: "late", start: "2026-12-20", position: 2 }),
       task({ id: "early", start: "2026-12-01", position: 3 }),
@@ -108,6 +108,32 @@ describe("所有事项的时间分组", () => {
       "late",
       "none",
     ]);
+  });
+});
+
+describe("标签筛选", () => {
+  const a = task({ id: "a", label_ids: ["x"] });
+  const b = task({ id: "b", label_ids: ["y"] });
+  const c = task({ id: "c", label_ids: [] });
+  const both = task({ id: "d", label_ids: ["x", "y"] });
+
+  it("不选标签时返回全部，包含没有标签的事项", () => {
+    expect(filterByLabels([a, b, c, both], []).map((t) => t.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("勾一个标签只留命中的，勾多个是并集", () => {
+    expect(filterByLabels([a, b, c, both], ["x"]).map((t) => t.id)).toEqual(["a", "d"]);
+    expect(filterByLabels([a, b, c, both], ["x", "y"]).map((t) => t.id)).toEqual([
+      "a",
+      "b",
+      "d",
+    ]);
+    expect(filterByLabels([a, b, c, both], ["z"])).toEqual([]);
   });
 });
 

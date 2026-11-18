@@ -19,6 +19,7 @@ import {
   bucketOrder,
   bucketTitles,
   dayLabel,
+  filterByLabels,
   monthCells,
   onDay,
   priorityColor,
@@ -31,6 +32,7 @@ import type { Task } from "./bindings/Task";
 import TaskRows from "./components/TaskRows.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import ManageDialog from "./components/ManageDialog.vue";
+import LabelFilter from "./components/LabelFilter.vue";
 import Sticky from "./Sticky.vue";
 
 const sticky = new URLSearchParams(location.search).get("view") === "sticky";
@@ -47,7 +49,24 @@ const storedLayout = localStorage.getItem("task-notes-layout");
 const layout = ref<Layout>(
   storedLayout === "calendar" || storedLayout === "week" ? storedLayout : "list",
 );
+function readLabelFilter(): string[] {
+  try {
+    const raw: unknown = JSON.parse(
+      localStorage.getItem("task-notes-label-filter") ?? "[]",
+    );
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 const weekOffset = ref(0);
+const labelFilter = ref<string[]>(readLabelFilter());
+watch(
+  labelFilter,
+  (value) => localStorage.setItem("task-notes-label-filter", JSON.stringify(value)),
+  { deep: true },
+);
 const editing = ref(false);
 const edited = ref<Task | null>(null);
 const editingParent = ref<string | null>(null);
@@ -85,6 +104,21 @@ const visible = computed(() => {
   });
 });
 
+const activeLabelFilter = computed(() =>
+  labelFilter.value.filter((id) => labels.value.some((label) => label.id === id)),
+);
+/** 周 / 月布局额外按标签收敛，列表布局不受影响。 */
+const layoutTasks = computed(() =>
+  layout.value === "list"
+    ? visible.value
+    : filterByLabels(visible.value, activeLabelFilter.value),
+);
+function toggleLabel(id: string) {
+  labelFilter.value = labelFilter.value.includes(id)
+    ? labelFilter.value.filter((item) => item !== id)
+    : [...labelFilter.value, id];
+}
+
 const groups = computed<Array<{ key: string; title: string; tasks: Task[] }>>(() => {
   if (!visible.value.length) return [];
   if (view.value === "today") return [{ key: "today", title: "今天", tasks: visible.value }];
@@ -109,12 +143,12 @@ const calendar = computed(
     new Map(
       monthCells(month.value).map((day) => [
         day,
-        visible.value.filter((task) => onDay(task, day)),
+        layoutTasks.value.filter((task) => onDay(task, day)),
       ]),
     ),
 );
 const selectedDayTasks = computed(() =>
-  visible.value.filter((task) => onDay(task, selected.value)),
+  layoutTasks.value.filter((task) => onDay(task, selected.value)),
 );
 const weekDays = computed(() =>
   Array.from({ length: 7 }, (_, index) =>
@@ -130,7 +164,7 @@ const weekTasks = computed(
     new Map(
       weekDays.value.map((day) => [
         day,
-        visible.value.filter((task) => onDay(task, day)),
+        layoutTasks.value.filter((task) => onDay(task, day)),
       ]),
     ),
 );
@@ -324,6 +358,12 @@ onUnmounted(app.stop);
             ><input type="checkbox" v-model="hideDone" />隐藏已完成</label
           >
         </div>
+        <LabelFilter
+          :labels="labels"
+          :selected="activeLabelFilter"
+          @toggle="toggleLabel"
+          @clear="labelFilter = []"
+        />
         <section class="panel calendar" aria-label="事项月历">
           <div class="weekday">
             <span v-for="d in ['一', '二', '三', '四', '五', '六', '日']" :key="d"
@@ -389,6 +429,12 @@ onUnmounted(app.stop);
             ><input type="checkbox" v-model="hideDone" />隐藏已完成</label
           >
         </div>
+        <LabelFilter
+          :labels="labels"
+          :selected="activeLabelFilter"
+          @toggle="toggleLabel"
+          @clear="labelFilter = []"
+        />
         <section class="panel week-panel" aria-label="七天安排">
           <div class="week-grid">
             <div
