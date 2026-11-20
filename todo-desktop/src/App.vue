@@ -141,6 +141,8 @@ const groups = computed<Array<{ key: string; title: string; tasks: Task[] }>>(()
     }));
 });
 
+// 每格能干净放下几条：六周的月份格子矮，五周的月份格子高。
+const cellSlots = computed(() => (monthCells(month.value).length / 7 >= 6 ? 4 : 5));
 const calendar = computed(
   () =>
     new Map(
@@ -150,6 +152,13 @@ const calendar = computed(
       ]),
     ),
 );
+/** 每格要放哪几条：有溢出时少画一条，把位置留给「另 N 项」。 */
+function cellTasks(day: string) {
+  const list = calendar.value.get(day) ?? [];
+  const overflow = list.length > cellSlots.value;
+  const shown = overflow ? list.slice(0, cellSlots.value - 1) : list;
+  return { list: shown, more: overflow ? list.length - shown.length : 0 };
+}
 const selectedDayTasks = computed(() =>
   sortTasks(layoutTasks.value.filter((task) => showsOn(task, selected.value)), selected.value),
 );
@@ -389,19 +398,19 @@ onUnmounted(app.stop);
             >
               <span class="date-number">{{ Number(d.slice(-2)) }}</span
               ><span
-                v-for="t in calendar.get(d)?.slice(0, 3)"
+                v-for="t in cellTasks(d).list"
                 :key="t.id"
                 class="calendar-task"
                 :class="{ done: doneOn(t, d) }"
                 :style="{ borderColor: t.color }"
                 >{{ t.title }}</span
-              ><small v-if="(calendar.get(d)?.length ?? 0) > 3" class="muted"
-                >另 {{ (calendar.get(d)?.length ?? 0) - 3 }} 项</small
+              ><small v-if="cellTasks(d).more" class="muted"
+                >另 {{ cellTasks(d).more }} 项</small
               >
             </button>
           </div>
         </section>
-        <section class="panel list-panel expanded">
+        <section class="panel list-panel day-panel">
           <header class="panel-head">
             <h2>
               {{ dayLabel(selected) }} 的安排

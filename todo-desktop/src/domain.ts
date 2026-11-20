@@ -49,7 +49,12 @@ export function shiftDay(day: string, delta: number) {
 export function monthCells(month: string) {
   const first = month + "-01",
     weekday = (new Date(first + "T12:00:00").getDay() + 6) % 7;
-  return Array.from({ length: 42 }, (_, i) => shiftDay(first, i - weekday));
+  // 只渲染当月实际需要的周数：五周的月份不硬塞第六行。
+  const year = Number(month.slice(0, 4)),
+    index = Number(month.slice(5, 7));
+  const days = new Date(year, index, 0).getDate();
+  const total = Math.ceil((weekday + days) / 7) * 7;
+  return Array.from({ length: total }, (_, i) => shiftDay(first, i - weekday));
 }
 
 /** 事项是否落在某一天：显式排除优先，其次显式加入，最后看日期范围。 */

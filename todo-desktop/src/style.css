@@ -228,16 +228,28 @@ h2 small {
   padding: 8px;
   font-size: 12px;
 }
+/* 月历吃掉剩余高度：格子随窗口等分拉伸，不再固定 83px。 */
 .calendar {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+.calendar .month-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.calendar .day-cell {
+  height: auto;
+  min-height: 0;
 }
 .day-cell {
-  height: 83px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   align-items: stretch;
-  gap: 3px;
+  gap: 2px;
   border: 0;
   border-top: 1px solid #edf0f5;
   border-right: 1px solid #edf0f5;
@@ -262,9 +274,12 @@ h2 small {
   font-weight: 700;
 }
 .calendar-task {
-  font-size: 11px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  height: 16px;
+  flex: 0 0 auto;
   border-left: 3px solid;
-  padding-left: 5px;
+  padding-left: 6px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -294,6 +309,16 @@ h2 small {
 }
 .list-panel.expanded .list-scroll {
   max-height: none;
+}
+/* 月历布局下的当天列表：固定矮栏，剩余高度全给月历。 */
+.list-panel.day-panel {
+  flex: 0 0 auto;
+  height: 140px;
+  min-height: 0;
+  max-height: none;
+}
+.list-panel.day-panel .list-scroll {
+  max-height: 112px;
 }
 .list-panel .actions > input {
   width: 180px;
@@ -590,8 +615,14 @@ legend {
     padding: 0 10px;
     gap: 6px;
   }
-  .day-cell {
-    height: 74px;
+  .calendar .month-grid {
+    grid-auto-rows: minmax(0, 1fr);
+  }
+  .list-panel.day-panel {
+    height: 140px;
+  }
+  .list-panel.day-panel .list-scroll {
+    max-height: 92px;
   }
   .panel-head {
     flex-wrap: wrap;

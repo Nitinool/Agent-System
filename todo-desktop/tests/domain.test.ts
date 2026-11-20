@@ -58,9 +58,10 @@ describe("独立事项的日期与完成显示", () => {
     expect(onDay(task({ start: null }), "2026-11-04")).toBe(false);
   });
 
-  it("月历周一起始，跨月与跨年日期正确", () => {
+  it("月历周一起始，跨月与跨年日期正确，五周的月份只渲染五行", () => {
     expect(monthCells("2026-11")).toHaveLength(42);
     expect(monthCells("2026-11")[0]).toBe("2026-10-26");
+    expect(monthCells("2026-06")).toHaveLength(35);
     expect(shiftDay("2026-12-31", 1)).toBe("2027-01-01");
     expect(dayLabel("2026-11-04")).toBe("11月4日 周三");
     expect(weekdayShort("2026-11-04")).toBe("三");
