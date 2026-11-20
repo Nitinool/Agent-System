@@ -311,14 +311,36 @@ h2 small {
   max-height: none;
 }
 /* 月历布局下的当天列表：固定矮栏，剩余高度全给月历。 */
-.list-panel.day-panel {
-  flex: 0 0 auto;
-  height: 140px;
+/* 月历布局：月历在左吃满高度，当天列表固定贴右侧。 */
+.calendar-layout {
+  display: flex;
+  gap: 14px;
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: none;
 }
-.list-panel.day-panel .list-scroll {
-  max-height: 112px;
+.calendar-layout .calendar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.day-panel {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.day-panel .list-scroll {
+  flex: 1 1 auto;
+  max-height: none;
+  overflow: auto;
+}
+.cell-tasks {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .list-panel .actions > input {
   width: 180px;
@@ -623,6 +645,12 @@ legend {
   }
   .list-panel.day-panel .list-scroll {
     max-height: 92px;
+  }
+  .calendar-layout {
+    flex-direction: column;
+  }
+  .day-panel {
+    flex: 0 0 140px;
   }
   .panel-head {
     flex-wrap: wrap;

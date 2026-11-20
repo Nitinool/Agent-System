@@ -375,13 +375,13 @@ try {
   await main.getByRole("button", { name: "月历布局", exact: true }).click();
   await main.getByLabel(tomorrow, { exact: true }).click();
   await expect(
-    main.locator(".list-panel .task-row").filter({ hasText: "七天布局新增" }),
+    main.locator(".day-panel .task-row").filter({ hasText: "七天布局新增" }),
   ).toHaveCount(1);
   const firstOfMonth = `${day.slice(0, 7)}-01`;
   if (firstOfMonth !== tomorrow) {
     await main.getByLabel(firstOfMonth, { exact: true }).click();
     await expect(
-      main.locator(".list-panel .task-row").filter({ hasText: "七天布局新增" }),
+      main.locator(".day-panel .task-row").filter({ hasText: "七天布局新增" }),
     ).toHaveCount(0);
   }
   await main.getByRole("button", { name: "列表布局", exact: true }).click();
