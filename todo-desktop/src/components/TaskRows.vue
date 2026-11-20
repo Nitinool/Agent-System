@@ -4,6 +4,7 @@ import type { Task } from "../bindings/Task";
 import { app } from "../state";
 import {
   doneOn,
+  finishedOn,
   onDay,
   orderedTree,
   priorityColor,
@@ -90,13 +91,13 @@ function drop(target: string) {
       <input
         type="checkbox"
         :aria-label="'完成 ' + row.task.title"
-        :checked="doneOn(row.task, app.state.day)"
+        :checked="finishedOn(row.task, app.state.day)"
         :disabled="app.state.loading || !app.state.ready"
         @change="
           app.change({
             type: 'task_complete',
             id: row.task.id,
-            completed: !doneOn(row.task, app.state.day),
+            completed: !finishedOn(row.task, app.state.day),
           })
         "
       />

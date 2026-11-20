@@ -20,6 +20,7 @@ import {
   bucketTitles,
   dayLabel,
   doneOn,
+  finishedOn,
   filterByLabels,
   monthCells,
   priorityColor,
@@ -84,7 +85,7 @@ const currentLabel = computed(
 );
 const allCount = computed(() => tasks.value.filter((task) => !task.completed).length);
 const todayCount = computed(
-  () => tasks.value.filter((task) => showsOn(task, app.state.day) && !doneOn(task, app.state.day)).length,
+  () => tasks.value.filter((task) => showsOn(task, app.state.day) && !finishedOn(task, app.state.day)).length,
 );
 
 const scoped = computed<Task[]>(() => {
@@ -97,7 +98,7 @@ const scoped = computed<Task[]>(() => {
 const visible = computed(() => {
   const needle = search.value.trim().toLocaleLowerCase();
   return scoped.value.filter((task) => {
-    if (hideDone.value && doneOn(task, app.state.day)) return false;
+    if (hideDone.value && finishedOn(task, app.state.day)) return false;
     if (!needle) return true;
     const names = task.label_ids
       .map((id) => labels.value.find((label) => label.id === id)?.name ?? "")

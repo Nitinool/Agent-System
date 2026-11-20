@@ -368,6 +368,24 @@ try {
   await main.getByRole("checkbox", { name: "隐藏已完成" }).uncheck();
   await expect(dailyRow).toBeVisible();
 
+  // 普通事项勾掉后只在自己的日期出现，不应铺满整月
+  await main.locator(".sidebar").getByRole("button", { name: "所有事项" }).click();
+  await main.getByRole("button", { name: "列表布局", exact: true }).click();
+  await main.getByRole("checkbox", { name: "完成 七天布局新增" }).check();
+  await main.getByRole("button", { name: "月历布局", exact: true }).click();
+  await main.getByLabel(tomorrow, { exact: true }).click();
+  await expect(
+    main.locator(".list-panel .task-row").filter({ hasText: "七天布局新增" }),
+  ).toHaveCount(1);
+  const firstOfMonth = `${day.slice(0, 7)}-01`;
+  if (firstOfMonth !== tomorrow) {
+    await main.getByLabel(firstOfMonth, { exact: true }).click();
+    await expect(
+      main.locator(".list-panel .task-row").filter({ hasText: "七天布局新增" }),
+    ).toHaveCount(0);
+  }
+  await main.getByRole("button", { name: "列表布局", exact: true }).click();
+
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify(
@@ -397,6 +415,7 @@ try {
           "recurrence-daily",
           "recurrence-roll",
           "hide-completed",
+          "completed-single-day",
         ],
         errors,
       },

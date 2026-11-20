@@ -70,11 +70,17 @@ export function occursOn(t: Task, day: string): boolean {
   return recurrenceMatches(t.start, t.recurrence, day);
 }
 
-/** 这一天是否已经勾掉（重复事项看当天的完成记录）。 */
+/** 这一天的安排是否已经勾掉。非重复事项只有落在自己的安排日期上才算，避免整月历都被画满。 */
 export function doneOn(t: Task, day: string): boolean {
-  if (t.completed) return true;
-  if (!t.recurrence) return false;
-  return t.completions.some((c) => c.due_date === day && !c.reopened_at);
+  if (t.recurrence) {
+    return t.completions.some((c) => c.due_date === day && !c.reopened_at);
+  }
+  return t.completed && onDay(t, day);
+}
+
+/** 这条事项是否已经收尾（用于「隐藏已完成」和排序，不看具体哪一天）。 */
+export function finishedOn(t: Task, day: string): boolean {
+  return t.completed || doneOn(t, day);
 }
 
 /** 视图里要不要显示：当天该做，或者当天已经勾掉（勾掉后日期滚到下一次，但今天仍要看得见）。 */
@@ -117,7 +123,7 @@ export function filterByLabels(items: readonly Task[], selected: readonly string
 export function sortBucket(items: readonly Task[], day = today()) {
   return [...items].sort(
     (a, b) =>
-      Number(doneOn(a, day)) - Number(doneOn(b, day)) ||
+      Number(finishedOn(a, day)) - Number(finishedOn(b, day)) ||
       (a.start ?? "9999-12-31").localeCompare(b.start ?? "9999-12-31") ||
       a.position - b.position ||
       a.id.localeCompare(b.id),
@@ -174,7 +180,7 @@ export function newDraft(day = today(), color = colors[0]): TaskDraft {
 export function sortTasks(items: readonly Task[], day = today()) {
   return [...items].sort(
     (a, b) =>
-      Number(doneOn(a, day)) - Number(doneOn(b, day)) ||
+      Number(finishedOn(a, day)) - Number(finishedOn(b, day)) ||
       a.position - b.position ||
       a.created_at.localeCompare(b.created_at) ||
       a.id.localeCompare(b.id),

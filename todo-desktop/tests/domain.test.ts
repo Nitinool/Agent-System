@@ -4,6 +4,7 @@ import {
   dayLabel,
   doneOn,
   filterByLabels,
+  finishedOn,
   monthCells,
   newDraft,
   occursOn,
@@ -214,6 +215,24 @@ describe("重复事项", () => {
       "done",
       "open",
     ]);
+  });
+});
+
+describe("完成态的日期边界", () => {
+  it("普通事项勾掉后只在自己的安排日显示，不会铺满整月", () => {
+    const t = task({ start: "2026-11-19", end: "2026-11-20", completed: true });
+    expect(doneOn(t, "2026-11-19")).toBe(true);
+    expect(doneOn(t, "2026-11-21")).toBe(false);
+    expect(showsOn(t, "2026-11-19")).toBe(true);
+    expect(showsOn(t, "2026-11-21")).toBe(false);
+    expect(showsOn(t, "2026-11-01")).toBe(false);
+    expect(finishedOn(t, "2026-11-21")).toBe(true);
+  });
+
+  it("没有日期的已完成事项不会出现在任何一天", () => {
+    const t = task({ start: null, end: null, completed: true });
+    expect(showsOn(t, "2026-11-19")).toBe(false);
+    expect(finishedOn(t, "2026-11-19")).toBe(true);
   });
 });
 
