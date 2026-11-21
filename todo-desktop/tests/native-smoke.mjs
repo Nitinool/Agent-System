@@ -386,6 +386,17 @@ try {
   }
   await main.getByRole("button", { name: "列表布局", exact: true }).click();
 
+  // 快速添加：打字回车即存为今天，输入框清空
+  const quickBox = main.getByLabel("快速添加事项");
+  await quickBox.fill("快速录入一");
+  await quickBox.press("Enter");
+  await expect(quickBox).toHaveValue("");
+  snap = await ipc(main, "snapshot");
+  expect(findTask(snap, "快速录入一").start).toBe(day);
+  await expect(
+    main.locator(".task-row").filter({ hasText: "快速录入一" }),
+  ).toBeVisible();
+
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify(
@@ -416,6 +427,7 @@ try {
           "recurrence-roll",
           "hide-completed",
           "completed-single-day",
+          "quick-add",
         ],
         errors,
       },

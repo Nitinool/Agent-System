@@ -884,6 +884,32 @@ legend {
 .layout-switch button:hover {
   background: #eef3fc;
 }
+.quick-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.quick-add input[type="text"] {
+  flex: 1 1 auto;
+  height: 36px;
+  font-size: 14px;
+  padding: 6px 12px;
+}
+.quick-add button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 16px;
+}
+.autostart-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #6f7d91;
+  padding: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
 .week-range {
   font-size: 13px;
   color: #526174;

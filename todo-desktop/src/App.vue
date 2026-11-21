@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   CalendarDays,
   CalendarRange,
@@ -13,6 +13,7 @@ import {
   StickyNote,
   Tag,
 } from "lucide-vue-next";
+import { invoke } from "@tauri-apps/api/core";
 import { app } from "./state";
 import {
   bucketOf,
@@ -23,6 +24,7 @@ import {
   finishedOn,
   filterByLabels,
   monthCells,
+  newDraft,
   priorityColor,
   shiftDay,
   shortDay,
@@ -70,6 +72,37 @@ watch(
   (value) => localStorage.setItem("task-notes-label-filter", JSON.stringify(value)),
   { deep: true },
 );
+const quick = ref("");
+const quickInput = ref<HTMLInputElement>();
+const autostart = ref(false);
+const autostartBusy = ref(false);
+
+/** 快速添加：回车即存为今天的事项，输入框清空并保持焦点，方便连着敲。 */
+async function addQuick() {
+  const title = quick.value.trim();
+  if (!title || !app.state.ready || app.state.loading) return;
+  const saved = await app.change({
+    type: "task_save",
+    id: null,
+    draft: { ...newDraft(app.state.day), title },
+  });
+  if (saved) {
+    quick.value = "";
+    quickInput.value?.focus();
+  }
+}
+async function toggleAutostart() {
+  const target = autostart.value;
+  autostartBusy.value = true;
+  try {
+    await invoke("set_autostart", { enabled: target });
+  } catch {
+    autostart.value = !target;
+    app.state.error = "无法修改开机启动设置，请检查系统权限。";
+  } finally {
+    autostartBusy.value = false;
+  }
+}
 const editing = ref(false);
 const edited = ref<Task | null>(null);
 const editingParent = ref<string | null>(null);
@@ -242,7 +275,16 @@ watch(
     }
   },
 );
-onMounted(() => void app.start());
+onMounted(async () => {
+  void app.start();
+  try {
+    autostart.value = await invoke<boolean>("autostart_enabled");
+  } catch {
+    autostart.value = false;
+  }
+  await nextTick();
+  quickInput.value?.focus();
+});
 onUnmounted(app.stop);
 </script>
 
@@ -292,6 +334,14 @@ onUnmounted(app.stop);
         <button @click="app.action('show_sticky')">
           <StickyNote :size="18" />打开桌面便签</button
         ><small>仅显示今日待办<br />可置顶 · 可直接勾选</small>
+        <label class="autostart-toggle">
+          <input
+            v-model="autostart"
+            type="checkbox"
+            :disabled="autostartBusy"
+            @change="toggleAutostart"
+          />开机自动启动
+        </label>
       </div>
     </aside>
 
@@ -337,6 +387,25 @@ onUnmounted(app.stop);
       <div v-if="app.state.error && !editing && !dialog" class="error-banner" role="alert">
         {{ app.state.error }} <button @click="app.refresh()">重试读取</button>
       </div>
+
+      <form class="quick-add" @submit.prevent="addQuick">
+        <input
+          ref="quickInput"
+          v-model="quick"
+          type="text"
+          aria-label="快速添加事项"
+          placeholder="写点什么，回车就加进今天…"
+          :disabled="!app.state.ready || app.state.loading"
+          autocomplete="off"
+          @keydown.esc="quick = ''"
+        />
+        <button
+          class="primary"
+          :disabled="!app.state.ready || app.state.loading || !quick.trim()"
+        >
+          添加
+        </button>
+      </form>
 
       <template v-if="layout === 'calendar' && view !== 'today'">
         <div class="toolbar">
