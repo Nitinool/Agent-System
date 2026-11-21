@@ -1,6 +1,6 @@
 [package]
 name = "task-notes"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
@@ -32,7 +32,7 @@ windows-sys = { version = "0.61", features = ["Win32_System_Registry"], optional
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "system-proxy"] }
 
 [build-dependencies]
-tauri-build = { version = "2", optional = true }
+tauri-build = { version = "2", optional = true , features = [] }
 
 [dev-dependencies]
 tempfile = "3"

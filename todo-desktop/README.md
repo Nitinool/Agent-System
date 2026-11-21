@@ -56,6 +56,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -Build
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/start.ps1 -CheckOnly
 ```
 
+## 打包安装包
+
+```powershell
+npm run tauri -- build
+# 或
+node node_modules\@tauri-apps\cli\tauri.js build
+```
+
+会依次做前端生产构建、release 编译（LTO + strip，比 debug 慢不少）和 NSIS 打包，产物在 `src-tauri\target\release\bundle\nsis\事项便签_<版本>_x64-setup.exe`。安装模式是**当前用户**，不需要管理员权限，装到 `%LOCALAPPDATA%\Programs\` 下；数据目录不变，仍是 `%LOCALAPPDATA%\Task-Notes`。
+
+- 安装包**没有代码签名**，首次运行 Windows SmartScreen 会提示「未知发布者」，需要点「更多信息 → 仍要运行」。这是没有证书时的必然现象，不是程序有问题。
+- 装完之后程序路径变了，**开机自启需要重新勾一次**（旧的注册表值还指向开发目录的 EXE）。
+- 同一台机器上，安装版和 `bin\task-notes.exe` 共用同一份数据；同时开两个会被单实例机制拦掉。
+
 构建后将嵌入界面的程序复制到 bin/task-notes.exe，日常入口固定运行该文件；后续开发构建不会把它替换成依赖 Vite 的开发程序。开发模式即上面的 `npm run desktop`（或 `tools/start.ps1 -Develop`），使用端口 1431，与原应用的端口不同。tools/start.ps1 含中文，保存为 UTF-8 BOM，兼容 Windows PowerShell 5.1。
 
 ```powershell
