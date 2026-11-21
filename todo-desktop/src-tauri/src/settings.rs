@@ -7,6 +7,10 @@ use std::path::Path;
 pub struct Settings {
     #[serde(default)]
     pub reminder_time: Option<String>,
+    #[serde(default)]
+    pub sync_last_at: Option<String>,
+    #[serde(default)]
+    pub sync_last_message: Option<String>,
 }
 
 fn file(directory: &Path) -> std::path::PathBuf {

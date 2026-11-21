@@ -24,9 +24,18 @@
 
 双击仓库根目录 **启动事项便签.cmd**，运行已经编译好的程序，不重新编译。没有 EXE 时会明确提示先构建。当前使用嵌入界面的 debug EXE；可单独运行，不需要 Node、Rust 或业务服务器，电脑须有 WebView2。
 
+## 同步
+
+左栏底部「数据同步」里填一次 Fine-grained Token（对该私有仓库 Contents 读写），之后点「立即同步」即可；Token 由 Rust 调用 Windows DPAPI 加密保存为 `sync-token.dpapi`，不进数据库、日志或仓库。
+
+- 与主应用共用私有仓库 `Nitinool/Agent-System-data`，但用独立文件 `sync/v2/task-notes.json` 和独立凭据。
+- 合并规则：按事项 `id` 对比 `updated_at`，新的那条整条胜出；两边独有的记录都会保留。删除以回收站记录的形式同步，不会在另一台「复活」。
+- 每次同步前会先在 `backups/` 留一份快照；写入远端使用文件 sha，远端被别处改过会提示再同步一次。
+- 默认手动同步；换电脑前先在这台同步，到另一台先同步再编辑。
+
 ## 数据
 
-资料独立保存在 **%LOCALAPPDATA%/Task-Notes/tasks.sqlite3**（SQLite schema 4，正表化）。提醒时间等设置在同目录的 settings.json。不读取或写入 Agent-System-V2，不导入已有事项，不使用原应用的同步 Token 或远端文件。本版只做本机持久化，尚未提供跨电脑同步。
+资料独立保存在 **%LOCALAPPDATA%/Task-Notes/tasks.sqlite3**（SQLite schema 4，正表化）。提醒时间与同步状态在同目录的 settings.json。不读取或写入 Agent-System-V2，不导入已有事项，不使用原应用的同步 Token 或远端文件。
 
 项目、分区、完成历史、标签关联等表仍在库里，只是当前没有界面入口；删除事项会连带删除它的子事项。换版本前请自行备份，升级只在 schema 变化时发生。
 

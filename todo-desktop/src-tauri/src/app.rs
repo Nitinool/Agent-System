@@ -152,6 +152,49 @@ fn set_reminder_time(time: Option<String>) -> Result<Option<String>> {
     Ok(settings.reminder_time)
 }
 #[tauri::command]
+fn sync_status() -> Result<(bool, Option<String>, Option<String>)> {
+    let directory = crate::directory::data_directory()?;
+    let settings = crate::settings::load(&directory);
+    Ok((
+        crate::sync::has_token(&directory),
+        settings.sync_last_at,
+        settings.sync_last_message,
+    ))
+}
+#[tauri::command]
+fn sync_save_token(token: String) -> Result<bool> {
+    let directory = crate::directory::data_directory()?;
+    crate::sync::save_token(&directory, &token)?;
+    Ok(crate::sync::has_token(&directory))
+}
+#[tauri::command]
+async fn sync_run(state: tauri::State<'_, State>) -> Result<crate::sync::Report> {
+    let directory = crate::directory::data_directory()?;
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut store = db.lock().map_err(|_| interrupted())?;
+        // 同步前先留一份快照，出问题能回到同步前。
+        store.backup_to(&directory.join("tasks.sqlite3"))?;
+        let report = crate::sync::run(&directory, &mut store)?;
+        let mut settings = crate::settings::load(&directory);
+        settings.sync_last_at = Some(chrono::Local::now().to_rfc3339());
+        settings.sync_last_message = Some(format!(
+            "{} 条事项 / {} 个标签{}",
+            report.tasks,
+            report.labels,
+            if report.uploaded {
+                "，已上传"
+            } else {
+                "，远端无变化"
+            }
+        ));
+        crate::settings::save(&directory, &settings)?;
+        Ok(report)
+    })
+    .await
+    .map_err(|_| interrupted())?
+}
+#[tauri::command]
 fn autostart_enabled() -> Result<bool> {
     Ok(crate::autostart::enabled())
 }
@@ -245,7 +288,10 @@ pub fn run() {
             set_autostart,
             trash,
             reminder_time,
-            set_reminder_time
+            set_reminder_time,
+            sync_status,
+            sync_save_token,
+            sync_run
         ])
         .build(tauri::generate_context!());
     match built {

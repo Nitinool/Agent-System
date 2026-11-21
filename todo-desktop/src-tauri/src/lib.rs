@@ -8,3 +8,4 @@ pub mod model;
 #[cfg(feature = "desktop")]
 pub mod settings;
 pub mod store;
+pub mod sync;

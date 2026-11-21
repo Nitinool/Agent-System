@@ -1,6 +1,7 @@
 // Real WebView2 → Tauri → SQLite, in a disposable LOCALAPPDATA profile.
 import { chromium, expect } from "@playwright/test";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import net from "node:net";
@@ -411,7 +412,7 @@ try {
   await quickRow.locator(".task-title").click();
   await main.getByRole("button", { name: "删除事项", exact: true }).click();
   await main.getByRole("button", { name: "确认删除", exact: true }).click();
-  await main.locator(".trash-link").click();
+  await main.locator(".trash-link").filter({ hasText: "回收站" }).click();
   const trashed = main.locator(".trash-row").filter({ hasText: "快速录入一" });
   await expect(trashed).toBeVisible();
   await trashed.getByRole("button", { name: "恢复", exact: true }).click();
@@ -420,6 +421,15 @@ try {
   // 回顾页
   await main.locator(".sidebar").getByRole("button", { name: "回顾" }).click();
   await expect(main.locator(".review-card").first()).toBeVisible();
+
+  // 数据同步面板：未配置 → 保存 Token → 已配置（不真的连远端）
+  await main.getByRole("button", { name: "数据同步" }).click();
+  await expect(main.getByText("还没有配置 Token")).toBeVisible();
+  await main.getByPlaceholder("github_pat_…").fill("test-token");
+  await main.getByRole("button", { name: "保存 Token" }).click();
+  await expect(main.getByText("已配置 Token")).toBeVisible();
+  await main.getByRole("button", { name: "关闭" }).click();
+  expect(existsSync(join(profile, "Task-Notes", "sync-token.dpapi"))).toBe(true);
 
   expect(errors).toEqual([]);
   console.log(
@@ -455,6 +465,7 @@ try {
           "trash-undo",
           "trash-restore",
           "review",
+          "sync-panel",
         ],
         errors,
       },

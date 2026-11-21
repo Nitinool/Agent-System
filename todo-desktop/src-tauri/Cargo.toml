@@ -29,6 +29,7 @@ tauri-plugin-single-instance = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 rfd = { version = "0.15", optional = true }
 windows-sys = { version = "0.61", features = ["Win32_System_Registry"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "system-proxy"] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

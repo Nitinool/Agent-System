@@ -11,6 +11,7 @@ import {
   Layers,
   Pencil,
   Plus,
+  Cloud,
   StickyNote,
   Tag,
   Trash2,
@@ -40,6 +41,7 @@ import TaskRows from "./components/TaskRows.vue";
 import TaskEditor from "./components/TaskEditor.vue";
 import ManageDialog from "./components/ManageDialog.vue";
 import LabelFilter from "./components/LabelFilter.vue";
+import SyncDialog from "./components/SyncDialog.vue";
 import Sticky from "./Sticky.vue";
 
 const sticky = new URLSearchParams(location.search).get("view") === "sticky";
@@ -108,6 +110,7 @@ async function toggleAutostart() {
 const trashTasks = ref<Task[]>([]);
 const toast = ref(false);
 const reminderTime = ref("");
+const syncOpen = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 async function loadTrash() {
@@ -476,6 +479,9 @@ onUnmounted(() => {
             @change="saveReminder"
           />
         </label>
+        <button class="trash-link" @click="syncOpen = true">
+          <Cloud :size="16" />数据同步
+        </button>
         <button class="trash-link" @click="openTrash">
           <Trash2 :size="16" />回收站<small v-if="trashTasks.length">{{ trashTasks.length }}</small>
         </button>
@@ -813,6 +819,7 @@ onUnmounted(() => {
     @close="editing = false"
     @deleted="onDeleted"
   />
+  <SyncDialog v-if="!sticky" :open="syncOpen" @close="syncOpen = false" />
   <ManageDialog
     v-if="!sticky && dialog"
     :open="!!dialog"

@@ -506,6 +506,136 @@ impl Store {
         Ok((due, overdue))
     }
 
+    /// 同步前留一份快照。
+    pub fn backup_to(&self, database: &Path) -> Result<std::path::PathBuf> {
+        migrate::backup_now(&self.conn, database)
+    }
+
+    /// 同步用：包含回收站里的全部事项。
+    pub fn all_tasks(&self) -> Result<Vec<Task>> {
+        let sql = format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY position,created_at,id");
+        self.collect_tasks(&sql)
+    }
+
+    pub fn all_labels(&self) -> Result<Vec<Label>> {
+        let mut statement = self.conn.prepare(
+            "SELECT id,name,color,position,created_at,updated_at FROM labels ORDER BY position,created_at,id",
+        )?;
+        let labels = statement
+            .query_map([], |r| {
+                Ok(Label {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    color: r.get(2)?,
+                    position: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<Label>, _>>()?;
+        Ok(labels)
+    }
+
+    /// 把合并后的结果写回本地：整条覆盖事项并重写子表，最后推进版本号让窗口刷新。
+    pub fn apply_sync(&mut self, tasks: &[Task], labels: &[Label]) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for label in labels {
+            tx.execute(
+                "INSERT INTO labels(id,name,color,position,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(id) DO UPDATE SET name=excluded.name,color=excluded.color,position=excluded.position,updated_at=excluded.updated_at",
+                params![
+                    label.id,
+                    label.name,
+                    label.color,
+                    label.position,
+                    label.created_at,
+                    label.updated_at
+                ],
+            )?;
+        }
+        // 先写事项本体（父事项可能排在后面，先留空），再补父子关系。
+        for task in tasks {
+            let project = match &task.project_id {
+                Some(id) if exists(&tx, "projects", id)? => Some(id.clone()),
+                _ => None,
+            };
+            let section = match (&project, &task.section_id) {
+                (Some(_), Some(id)) if exists(&tx, "sections", id)? => Some(id.clone()),
+                _ => None,
+            };
+            tx.execute("DELETE FROM task_labels WHERE task_id=?1", [&task.id])?;
+            tx.execute("DELETE FROM task_completions WHERE task_id=?1", [&task.id])?;
+            tx.execute("DELETE FROM task_days WHERE task_id=?1", [&task.id])?;
+            tx.execute(
+                "INSERT INTO tasks(id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,recurrence,repeat_until,position,completed,created_at,updated_at,deleted_at)
+                 VALUES(?1,?2,?3,NULL,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+                 ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,section_id=excluded.section_id,title=excluded.title,notes=excluded.notes,color=excluded.color,priority=excluded.priority,start_date=excluded.start_date,end_date=excluded.end_date,recurrence=excluded.recurrence,repeat_until=excluded.repeat_until,position=excluded.position,completed=excluded.completed,updated_at=excluded.updated_at,deleted_at=excluded.deleted_at",
+                params![
+                    task.id,
+                    project,
+                    section,
+                    task.title,
+                    task.notes,
+                    task.color,
+                    task.priority,
+                    task.start,
+                    task.end,
+                    task.recurrence,
+                    task.repeat_until,
+                    task.position,
+                    task.completed,
+                    task.created_at,
+                    task.updated_at,
+                    task.deleted_at
+                ],
+            )?;
+            for label in &task.label_ids {
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?1,?2)",
+                    params![task.id, label],
+                )?;
+            }
+            for completion in &task.completions {
+                tx.execute(
+                    "INSERT INTO task_completions(task_id,completed_at,reopened_at,due_date) VALUES(?1,?2,?3,?4)",
+                    params![
+                        task.id,
+                        completion.completed_at,
+                        completion.reopened_at,
+                        completion.due_date
+                    ],
+                )?;
+            }
+            for day in &task.included_days {
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_days(task_id,day,included) VALUES(?1,?2,1)",
+                    params![task.id, day],
+                )?;
+            }
+            for day in &task.excluded_days {
+                tx.execute(
+                    "INSERT OR IGNORE INTO task_days(task_id,day,included) VALUES(?1,?2,0)",
+                    params![task.id, day],
+                )?;
+            }
+        }
+        for task in tasks {
+            if let Some(parent) = &task.parent_id {
+                if exists(&tx, "tasks", parent)? {
+                    tx.execute(
+                        "UPDATE tasks SET parent_id=?2 WHERE id=?1",
+                        params![task.id, parent],
+                    )?;
+                }
+            }
+        }
+        tx.execute("UPDATE state SET revision=revision+1 WHERE id=1", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn collect_tasks(&self, sql: &str) -> Result<Vec<Task>> {
         let mut statement = self.conn.prepare(sql)?;
         let mut tasks = statement
