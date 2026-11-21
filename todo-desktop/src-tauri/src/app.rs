@@ -5,6 +5,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use tauri_plugin_notification::NotificationExt;
 struct State {
     db: Arc<Mutex<Store>>,
 }
@@ -12,6 +13,54 @@ struct State {
 struct Launch {
     hidden: bool,
     tray: bool,
+}
+/// 记录最近一次弹过提醒的日期，避免同一天重复打扰。
+struct Reminder {
+    last: Mutex<Option<String>>,
+}
+fn reminder_tick(app: &tauri::AppHandle) {
+    let Ok(directory) = crate::directory::data_directory() else {
+        return;
+    };
+    let Some(time) = crate::settings::load(&directory).reminder_time else {
+        return;
+    };
+    let now = chrono::Local::now();
+    if now.format("%H:%M").to_string() != time {
+        return;
+    }
+    let today = now.format("%Y-%m-%d").to_string();
+    {
+        let reminder = app.state::<Reminder>();
+        let Ok(mut last) = reminder.last.lock() else {
+            return;
+        };
+        if last.as_deref() == Some(today.as_str()) {
+            return;
+        }
+        *last = Some(today.clone());
+    }
+    let state = app.state::<State>();
+    let Ok(store) = state.db.lock() else {
+        return;
+    };
+    let Ok((due, overdue)) = store.summary(&today) else {
+        return;
+    };
+    drop(store);
+    if due == 0 && overdue == 0 {
+        return;
+    }
+    let mut body = format!("今天还有 {due} 项待办");
+    if overdue > 0 {
+        body.push_str(&format!("，其中 {overdue} 项已过期"));
+    }
+    let _ = app
+        .notification()
+        .builder()
+        .title("事项便签")
+        .body(body)
+        .show();
 }
 fn interrupted() -> AppError {
     AppError::new("worker", "后台服务暂不可用，请重试。")
@@ -80,6 +129,29 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 #[tauri::command]
+async fn trash(state: tauri::State<'_, State>) -> Result<Vec<Task>> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || db.lock().map_err(|_| interrupted())?.trash())
+        .await
+        .map_err(|_| interrupted())?
+}
+#[tauri::command]
+fn reminder_time() -> Result<Option<String>> {
+    let directory = crate::directory::data_directory()?;
+    Ok(crate::settings::load(&directory).reminder_time)
+}
+#[tauri::command]
+fn set_reminder_time(time: Option<String>) -> Result<Option<String>> {
+    let directory = crate::directory::data_directory()?;
+    let mut settings = crate::settings::load(&directory);
+    settings.reminder_time = match time {
+        Some(value) if !value.trim().is_empty() => Some(crate::settings::checked_time(value.trim())?),
+        _ => None,
+    };
+    crate::settings::save(&directory, &settings)?;
+    Ok(settings.reminder_time)
+}
+#[tauri::command]
 fn autostart_enabled() -> Result<bool> {
     Ok(crate::autostart::enabled())
 }
@@ -127,6 +199,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let _ = show(app, "main");
         }))
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let hidden = std::env::args().any(|arg| arg == "--hidden");
             let directory = crate::directory::data_directory()?;
@@ -137,6 +210,15 @@ pub fn run() {
             });
             let tray = build_tray(app.handle()).is_ok();
             app.manage(Launch { hidden, tray });
+            app.manage(Reminder {
+                last: Mutex::new(None),
+            });
+            // 每 30 秒看一次提醒时间，命中且今天还没弹过就提醒一次。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                reminder_tick(&handle);
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -160,7 +242,10 @@ pub fn run() {
             app_ready,
             quit_app,
             autostart_enabled,
-            set_autostart
+            set_autostart,
+            trash,
+            reminder_time,
+            set_reminder_time
         ])
         .build(tauri::generate_context!());
     match built {

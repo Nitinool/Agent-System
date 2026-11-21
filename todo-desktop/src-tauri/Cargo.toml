@@ -14,7 +14,7 @@ required-features = ["desktop"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-single-instance", "dep:rfd", "dep:windows-sys"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-single-instance", "dep:tauri-plugin-notification", "dep:rfd", "dep:windows-sys"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v4"] }
 ts-rs = { version = "11", features = ["no-serde-warnings"] }
 tauri = { version = "2", features = ["tray-icon"], optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
 rfd = { version = "0.15", optional = true }
 windows-sys = { version = "0.61", features = ["Win32_System_Registry"], optional = true }
 

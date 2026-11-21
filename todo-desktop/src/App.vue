@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
+  BarChart3,
   CalendarDays,
   CalendarRange,
   CheckSquare,
@@ -12,6 +13,7 @@ import {
   Plus,
   StickyNote,
   Tag,
+  Trash2,
 } from "lucide-vue-next";
 import { invoke } from "@tauri-apps/api/core";
 import { app } from "./state";
@@ -42,7 +44,7 @@ import Sticky from "./Sticky.vue";
 
 const sticky = new URLSearchParams(location.search).get("view") === "sticky";
 
-type View = "all" | "today" | "label";
+type View = "all" | "today" | "label" | "trash" | "review";
 const view = ref<View>("all");
 const labelId = ref<string | null>(null);
 const selected = ref(app.state.day);
@@ -103,6 +105,115 @@ async function toggleAutostart() {
     autostartBusy.value = false;
   }
 }
+const trashTasks = ref<Task[]>([]);
+const toast = ref(false);
+const reminderTime = ref("");
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function loadTrash() {
+  try {
+    trashTasks.value = await invoke<Task[]>("trash");
+  } catch {
+    trashTasks.value = [];
+  }
+}
+function openTrash() {
+  view.value = "trash";
+  void loadTrash();
+}
+async function restoreTask(id: string) {
+  if (await app.change({ type: "task_restore", id })) void loadTrash();
+}
+async function purgeTask(id: string) {
+  if (await app.change({ type: "task_purge", id })) void loadTrash();
+}
+async function undoDelete() {
+  if (await app.change({ type: "undo_delete" })) {
+    toast.value = false;
+    if (view.value === "trash") void loadTrash();
+  }
+}
+/** 删除后给 8 秒反悔窗口。 */
+function onDeleted() {
+  toast.value = true;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toast.value = false), 8000);
+  if (view.value === "trash") void loadTrash();
+}
+async function saveReminder() {
+  try {
+    reminderTime.value =
+      (await invoke<string | null>("set_reminder_time", {
+        time: reminderTime.value || null,
+      })) ?? "";
+  } catch {
+    app.state.error = "提醒时间保存失败，请检查数据目录权限。";
+  }
+}
+function onKey(event: KeyboardEvent) {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "z" &&
+    !editing.value &&
+    !dialog.value
+  ) {
+    event.preventDefault();
+    void undoDelete();
+  }
+}
+
+function localDate(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+const completionDays = computed(() => {
+  const counts = new Map<string, number>();
+  for (const task of tasks.value) {
+    for (const completion of task.completions) {
+      if (completion.reopened_at) continue;
+      const day = localDate(completion.completed_at);
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+  }
+  return counts;
+});
+const reviewDays = computed(() =>
+  Array.from({ length: 14 }, (_, index) => {
+    const day = shiftDay(app.state.day, index - 13);
+    return {
+      day,
+      count: completionDays.value.get(day) ?? 0,
+      label: String(Number(day.slice(8, 10))),
+    };
+  }),
+);
+const reviewMax = computed(() =>
+  Math.max(1, ...reviewDays.value.map((item) => item.count)),
+);
+function barHeight(count: number) {
+  return `${Math.round((count / reviewMax.value) * 100)}%`;
+}
+const weekTotal = computed(() =>
+  reviewDays.value.slice(-7).reduce((sum, item) => sum + item.count, 0),
+);
+const monthTotal = computed(() => {
+  const prefix = app.state.day.slice(0, 7);
+  let total = 0;
+  for (const [day, count] of completionDays.value) {
+    if (day.startsWith(prefix)) total += count;
+  }
+  return total;
+});
+const streak = computed(() => {
+  let days = 0;
+  for (let index = 0; index < 365; index++) {
+    const day = shiftDay(app.state.day, -index);
+    if ((completionDays.value.get(day) ?? 0) > 0) days++;
+    else if (index === 0) continue;
+    else break;
+  }
+  return days;
+});
 const editing = ref(false);
 const edited = ref<Task | null>(null);
 const editingParent = ref<string | null>(null);
@@ -208,11 +319,15 @@ const weekTasks = computed(
 const listTitle = computed(() => {
   if (view.value === "today") return "今天";
   if (view.value === "label") return currentLabel.value?.name ?? "标签";
+  if (view.value === "review") return "回顾";
+  if (view.value === "trash") return "回收站";
   return "所有事项";
 });
 const subtitle = computed(() => {
   if (view.value === "today") return `${dayLabel(app.state.day)} · 待办 ${todayCount.value} 项`;
   if (view.value === "label") return "按标签跨时间查看。";
+  if (view.value === "review") return "完成的记录都在这里。";
+  if (view.value === "trash") return "删掉的事项保留 30 天，可随时恢复。";
   return `未完成 ${allCount.value} 项 · 按时间排`;
 });
 const emptyText = computed(() =>
@@ -267,6 +382,12 @@ function choose(day: string) {
   if (!day.startsWith(month.value)) month.value = day.slice(0, 7);
 }
 watch(
+  () => app.snapshot.value.revision,
+  () => {
+    if (view.value === "trash") void loadTrash();
+  },
+);
+watch(
   () => app.state.day,
   (day, previous) => {
     if (selected.value === previous) {
@@ -277,6 +398,12 @@ watch(
 );
 onMounted(async () => {
   void app.start();
+  window.addEventListener("keydown", onKey);
+  try {
+    reminderTime.value = (await invoke<string | null>("reminder_time")) ?? "";
+  } catch {
+    reminderTime.value = "";
+  }
   try {
     autostart.value = await invoke<boolean>("autostart_enabled");
   } catch {
@@ -285,7 +412,11 @@ onMounted(async () => {
   await nextTick();
   quickInput.value?.focus();
 });
-onUnmounted(app.stop);
+onUnmounted(() => {
+  app.stop();
+  window.removeEventListener("keydown", onKey);
+  clearTimeout(toastTimer);
+});
 </script>
 
 <template>
@@ -299,7 +430,9 @@ onUnmounted(app.stop);
         <button :class="{ active: view === 'all' }" @click="open('all')">
           <Layers :size="18" />所有事项<small>{{ allCount }}</small></button
         ><button :class="{ active: view === 'today' }" @click="open('today')">
-          <CheckSquare :size="18" />今天<small>{{ todayCount }}</small>
+          <CheckSquare :size="18" />今天<small>{{ todayCount }}</small></button
+        ><button :class="{ active: view === 'review' }" @click="open('review')">
+          <BarChart3 :size="18" />回顾
         </button>
       </nav>
 
@@ -334,6 +467,18 @@ onUnmounted(app.stop);
         <button @click="app.action('show_sticky')">
           <StickyNote :size="18" />打开桌面便签</button
         ><small>仅显示今日待办<br />可置顶 · 可直接勾选</small>
+        <label class="reminder-row">
+          提醒<input
+            v-model="reminderTime"
+            type="time"
+            aria-label="每日提醒时间"
+            :disabled="app.state.loading"
+            @change="saveReminder"
+          />
+        </label>
+        <button class="trash-link" @click="openTrash">
+          <Trash2 :size="16" />回收站<small v-if="trashTasks.length">{{ trashTasks.length }}</small>
+        </button>
         <label class="autostart-toggle">
           <input
             v-model="autostart"
@@ -388,7 +533,7 @@ onUnmounted(app.stop);
         {{ app.state.error }} <button @click="app.refresh()">重试读取</button>
       </div>
 
-      <form class="quick-add" @submit.prevent="addQuick">
+      <form v-if="view !== 'trash' && view !== 'review'" class="quick-add" @submit.prevent="addQuick">
         <input
           ref="quickInput"
           v-model="quick"
@@ -551,6 +696,70 @@ onUnmounted(app.stop);
         </section>
       </template>
 
+      <template v-else-if="view === 'review'">
+        <div class="review-cards">
+          <div class="review-card"><strong>{{ weekTotal }}</strong><span>本周完成</span></div>
+          <div class="review-card"><strong>{{ monthTotal }}</strong><span>本月完成</span></div>
+          <div class="review-card"><strong>{{ streak }}</strong><span>连续天数</span></div>
+        </div>
+        <section class="panel list-panel expanded">
+          <header class="panel-head">
+            <h2>
+              最近 14 天
+              <small class="muted"
+                >共
+                {{ reviewDays.reduce((sum, item) => sum + item.count, 0) }}
+                次</small
+              >
+            </h2>
+          </header>
+          <div class="review-bars">
+            <div
+              v-for="item in reviewDays"
+              :key="item.day"
+              class="review-bar"
+              :title="item.day + '：' + item.count"
+            >
+              <div
+                class="review-bar-fill"
+                :style="{ height: barHeight(item.count) }"
+              />
+              <small>{{ item.label }}</small>
+            </div>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="view === 'trash'">
+        <section class="panel list-panel expanded">
+          <header class="panel-head">
+            <h2>
+              回收站
+              <small class="muted">{{ trashTasks.length }} 项 · 保留 30 天</small>
+            </h2>
+            <div class="actions">
+              <button @click="loadTrash">刷新</button>
+            </div>
+          </header>
+          <div class="list-scroll">
+            <p v-if="!trashTasks.length" class="empty">回收站是空的。</p>
+            <div
+              v-for="task in trashTasks"
+              :key="task.id"
+              class="task-row trash-row"
+            >
+              <span class="task-title">{{ task.title }}</span>
+              <small class="muted">{{
+                (task.deleted_at ?? "").slice(0, 16).replace("T", " ")
+              }}</small>
+              <button class="quiet" @click="restoreTask(task.id)">恢复</button>
+              <button class="quiet danger" @click="purgeTask(task.id)">
+                彻底删除
+              </button>
+            </div>
+          </div>
+        </section>
+      </template>
       <section v-else class="panel list-panel expanded">
         <header class="panel-head">
           <h2>
@@ -584,6 +793,10 @@ onUnmounted(app.stop);
         </div>
       </section>
 
+      <div v-if="toast" class="toast" role="status">
+        已移入回收站
+        <button @click="undoDelete">撤销</button>
+      </div>
       <footer class="app-footer">
         <span>{{ app.state.ready ? "已保存到本机" : "正在读取…" }}</span
         ><span>新增默认今天 · 结束日期留空为单日 · {{ shortDay(app.state.day) }}</span>
@@ -598,6 +811,7 @@ onUnmounted(app.stop);
     :parent-id="editingParent"
     :start-day="editingStart"
     @close="editing = false"
+    @deleted="onDeleted"
   />
   <ManageDialog
     v-if="!sticky && dialog"

@@ -397,6 +397,30 @@ try {
     main.locator(".task-row").filter({ hasText: "快速录入一" }),
   ).toBeVisible();
 
+  // 回收站 + 撤销
+  const quickRow = main.locator(".task-row").filter({ hasText: "快速录入一" });
+  await quickRow.locator(".task-title").click();
+  await main.getByRole("button", { name: "删除事项", exact: true }).click();
+  await main.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(main.locator(".toast")).toBeVisible();
+  await expect(quickRow).toHaveCount(0);
+  await main.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(quickRow).toBeVisible();
+
+  // 再删一次，从回收站恢复
+  await quickRow.locator(".task-title").click();
+  await main.getByRole("button", { name: "删除事项", exact: true }).click();
+  await main.getByRole("button", { name: "确认删除", exact: true }).click();
+  await main.locator(".trash-link").click();
+  const trashed = main.locator(".trash-row").filter({ hasText: "快速录入一" });
+  await expect(trashed).toBeVisible();
+  await trashed.getByRole("button", { name: "恢复", exact: true }).click();
+  await expect(trashed).toHaveCount(0);
+
+  // 回顾页
+  await main.locator(".sidebar").getByRole("button", { name: "回顾" }).click();
+  await expect(main.locator(".review-card").first()).toBeVisible();
+
   expect(errors).toEqual([]);
   console.log(
     JSON.stringify(
@@ -428,6 +452,9 @@ try {
           "hide-completed",
           "completed-single-day",
           "quick-add",
+          "trash-undo",
+          "trash-restore",
+          "review",
         ],
         errors,
       },

@@ -5,4 +5,6 @@ pub mod autostart;
 pub mod directory;
 pub mod migrate;
 pub mod model;
+#[cfg(feature = "desktop")]
+pub mod settings;
 pub mod store;

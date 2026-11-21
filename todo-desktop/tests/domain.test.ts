@@ -26,6 +26,7 @@ const task = (overrides: Partial<Task> = {}): Task => ({
   position: 0,
   completed: false,
   completions: [],
+  deleted_at: null,
   included_days: [],
   excluded_days: [],
   created_at: "2026-11-04T08:00:00+08:00",

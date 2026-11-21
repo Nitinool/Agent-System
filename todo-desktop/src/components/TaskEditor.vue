@@ -23,7 +23,7 @@ const props = withDefaults(
   }>(),
   { projectId: null, parentId: null, startDay: null },
 );
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; deleted: [] }>();
 
 const f = reactive<TaskDraft>(newDraft());
 const initial = ref("");
@@ -101,8 +101,10 @@ async function save() {
     emit("close");
 }
 async function remove() {
-  if (props.task && (await app.change({ type: "task_delete", id: props.task.id })))
+  if (props.task && (await app.change({ type: "task_delete", id: props.task.id }))) {
+    emit("deleted");
     emit("close");
+  }
 }
 function preset(days: number) {
   f.start = app.state.day;

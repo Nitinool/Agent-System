@@ -71,6 +71,8 @@ pub struct Task {
     pub included_days: Vec<String>,
     pub excluded_days: Vec<String>,
     pub label_ids: Vec<String>,
+    /// 软删除时间；非空表示在回收站里。
+    pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -121,6 +123,13 @@ pub enum Mutation {
     TaskDelete {
         id: String,
     },
+    TaskRestore {
+        id: String,
+    },
+    TaskPurge {
+        id: String,
+    },
+    UndoDelete,
     TaskToday {
         id: String,
         day: String,

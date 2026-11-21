@@ -670,3 +670,91 @@ fn recurrence_validation_rejects_contradictory_dates() {
         .mutate(Mutation::TaskSave { id: None, draft: until_without_rule }, 0)
         .is_err());
 }
+
+#[test]
+fn deleting_moves_to_trash_and_restore_brings_back_the_subtree() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+    let snap = add(&mut s, draft(Some("2026-11-19"), None));
+    let parent = snap.tasks[0].id.clone();
+    let mut child = draft(None, None);
+    child.title = "子任务".into();
+    child.parent_id = Some(parent.clone());
+    let snap = s
+        .mutate(Mutation::TaskSave { id: None, draft: child }, snap.revision)
+        .unwrap();
+    assert_eq!(snap.tasks.len(), 2);
+
+    let snap = s
+        .mutate(Mutation::TaskDelete { id: parent.clone() }, snap.revision)
+        .unwrap();
+    assert!(snap.tasks.is_empty());
+    let trash = s.trash().unwrap();
+    assert_eq!(trash.len(), 2);
+    assert!(trash.iter().all(|task| task.deleted_at.is_some()));
+
+    let snap = s
+        .mutate(Mutation::TaskRestore { id: parent.clone() }, snap.revision)
+        .unwrap();
+    assert_eq!(snap.tasks.len(), 2);
+    assert!(s.trash().unwrap().is_empty());
+}
+
+#[test]
+fn undo_delete_restores_the_latest_batch_and_purge_is_permanent() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+    let snap = add(&mut s, draft(None, None));
+    let first = snap.tasks[0].id.clone();
+    let snap = add(&mut s, draft(None, None));
+    let second = snap.tasks[0].id.clone();
+
+    let snap = s
+        .mutate(Mutation::TaskDelete { id: second.clone() }, snap.revision)
+        .unwrap();
+    assert_eq!(snap.tasks.len(), 1);
+    let snap = s.mutate(Mutation::UndoDelete, snap.revision).unwrap();
+    assert_eq!(snap.tasks.len(), 2);
+    assert!(s.trash().unwrap().is_empty());
+
+    let snap = s
+        .mutate(Mutation::TaskDelete { id: first.clone() }, snap.revision)
+        .unwrap();
+    let snap = s
+        .mutate(Mutation::TaskPurge { id: first.clone() }, snap.revision)
+        .unwrap();
+    assert_eq!(snap.tasks.len(), 1);
+    assert!(s.trash().unwrap().is_empty());
+    assert!(s
+        .mutate(
+            Mutation::TaskRestore { id: first },
+            snap.revision
+        )
+        .is_err());
+}
+
+#[test]
+fn summary_counts_due_today_and_overdue() {
+    let temp = temporary();
+    let mut s = Store::open(&temp.path().join("tasks.sqlite3")).unwrap();
+    let today = day(0);
+    let oldest = day(-3);
+    add(&mut s, draft(Some(&today), None));
+    let snap = add(&mut s, draft(Some(&oldest), None));
+    let mut done = draft(Some(&today), None);
+    done.title = "已有完成".into();
+    let snap = s
+        .mutate(Mutation::TaskSave { id: None, draft: done }, snap.revision)
+        .unwrap();
+    let done_id = snap.tasks[2].id.clone();
+    let snap = s
+        .mutate(
+            Mutation::TaskComplete { id: done_id, completed: true },
+            snap.revision,
+        )
+        .unwrap();
+    assert_eq!(snap.tasks.len(), 3);
+    let (due, overdue) = s.summary(&today).unwrap();
+    assert_eq!(due, 1);
+    assert_eq!(overdue, 1);
+}

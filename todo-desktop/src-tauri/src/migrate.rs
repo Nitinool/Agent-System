@@ -133,12 +133,18 @@ ALTER TABLE tasks ADD COLUMN repeat_until TEXT;
 ALTER TABLE task_completions ADD COLUMN due_date TEXT;
 ";
 
-/// 新建资料：直接建 schema 3。
+/// schema 3 → 4：软删除标记，删掉的事项先进回收站。
+pub const V4: &str = "
+ALTER TABLE tasks ADD COLUMN deleted_at TEXT;
+";
+
+/// 新建资料：直接建 schema 4。
 pub fn create(conn: &Connection) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(SCHEMA)?;
     tx.execute_batch(V3)?;
-    tx.execute_batch("PRAGMA user_version=3;")?;
+    tx.execute_batch(V4)?;
+    tx.execute_batch("PRAGMA user_version=4;")?;
     tx.commit()?;
     Ok(())
 }
@@ -148,6 +154,15 @@ pub fn upgrade_2_to_3(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute_batch(V3)?;
     tx.execute_batch("PRAGMA user_version=3;")?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// 3 → 4，同样只是加列。
+pub fn upgrade_3_to_4(conn: &mut Connection) -> Result<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(V4)?;
+    tx.execute_batch("PRAGMA user_version=4;")?;
     tx.commit()?;
     Ok(())
 }

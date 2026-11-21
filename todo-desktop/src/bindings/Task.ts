@@ -21,4 +21,8 @@ recurrence: string | null,
 /**
  * 重复到哪一天为止；空表示一直重复。
  */
-repeat_until: string | null, position: number, completed: boolean, completions: Array<Completion>, included_days: Array<string>, excluded_days: Array<string>, label_ids: Array<string>, created_at: string, updated_at: string, };
+repeat_until: string | null, position: number, completed: boolean, completions: Array<Completion>, included_days: Array<string>, excluded_days: Array<string>, label_ids: Array<string>, 
+/**
+ * 软删除时间；非空表示在回收站里。
+ */
+deleted_at: string | null, created_at: string, updated_at: string, };

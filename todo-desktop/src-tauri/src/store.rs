@@ -131,12 +131,13 @@ fn row_to_task(r: &Row<'_>) -> rusqlite::Result<Task> {
         included_days: Vec::new(),
         excluded_days: Vec::new(),
         label_ids: Vec::new(),
+        deleted_at: r.get(16)?,
         created_at: r.get(14)?,
         updated_at: r.get(15)?,
     })
 }
 
-const TASK_COLUMNS: &str = "id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,recurrence,repeat_until,position,completed,created_at,updated_at";
+const TASK_COLUMNS: &str = "id,project_id,section_id,parent_id,title,notes,color,priority,start_date,end_date,recurrence,repeat_until,position,completed,created_at,updated_at,deleted_at";
 
 fn load_task(conn: &Connection, id: &str) -> Result<Option<Task>> {
     let sql = format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?1");
@@ -307,10 +308,15 @@ fn save_task(
         }
     }
     let existing = match &id {
-        Some(id) => Some(
-            load_task(conn, id)?
-                .ok_or_else(|| AppError::new("missing", "事项已被删除，请重新新增。"))?,
-        ),
+        Some(id) => {
+            let task = load_task(conn, id)?
+                .ok_or_else(|| AppError::new("missing", "事项已被删除，请重新新增。"))?;
+            ensure(
+                task.deleted_at.is_none(),
+                "事项在回收站里，请先恢复再编辑。",
+            )?;
+            Some(task)
+        }
         None => None,
     };
     validate_task(conn, id.as_deref(), draft)?;
@@ -371,19 +377,31 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
         let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        ensure(version <= 3, "资料来自更高版本，请更新应用；未修改数据。")?;
+        ensure(version <= 4, "资料来自更高版本，请更新应用；未修改数据。")?;
+        // v1 的升级流程自己会备份，这里只补 2 / 3 两种情况。
+        if (2..4).contains(&version) {
+            migrate::backup_now(&conn, path)?;
+        }
         match version {
             0 => migrate::create(&conn)?,
             1 => {
                 migrate::upgrade_from_1(&mut conn, path)?;
                 migrate::upgrade_2_to_3(&mut conn)?;
+                migrate::upgrade_3_to_4(&mut conn)?;
             }
             2 => {
-                migrate::backup_now(&conn, path)?;
                 migrate::upgrade_2_to_3(&mut conn)?;
+                migrate::upgrade_3_to_4(&mut conn)?;
             }
+            3 => migrate::upgrade_3_to_4(&mut conn)?,
             _ => {}
         }
+        // 回收站保留 30 天，超期清理。
+        let cutoff = (Local::now() - chrono::Duration::days(30)).to_rfc3339();
+        conn.execute(
+            "DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            [&cutoff],
+        )?;
         Ok(Self { conn })
     }
 
@@ -445,8 +463,49 @@ impl Store {
             labels.push(row?);
         }
 
-        let sql = format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY position,created_at,id");
-        let mut statement = self.conn.prepare(&sql)?;
+        let sql = format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE deleted_at IS NULL ORDER BY position,created_at,id"
+        );
+        let tasks = self.collect_tasks(&sql)?;
+
+        Ok(Snapshot {
+            revision,
+            projects,
+            sections,
+            labels,
+            tasks,
+        })
+    }
+
+    /// 回收站：只列已软删除的事项，最近删的在前。
+    pub fn trash(&self) -> Result<Vec<Task>> {
+        let sql = format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC,id"
+        );
+        self.collect_tasks(&sql)
+    }
+
+    /// 今天要做的事与已过期的数量，给提醒用。
+    pub fn summary(&self, day: &str) -> Result<(usize, usize)> {
+        let sql = format!("SELECT {TASK_COLUMNS} FROM tasks WHERE deleted_at IS NULL");
+        let tasks = self.collect_tasks(&sql)?;
+        let mut due = 0;
+        let mut overdue = 0;
+        for task in &tasks {
+            if shows_on(task, day) && !done_on(task, day) && !task.completed {
+                due += 1;
+            }
+            if let Some(end) = task.end.as_deref().or(task.start.as_deref()) {
+                if end < day && !task.completed {
+                    overdue += 1;
+                }
+            }
+        }
+        Ok((due, overdue))
+    }
+
+    fn collect_tasks(&self, sql: &str) -> Result<Vec<Task>> {
+        let mut statement = self.conn.prepare(sql)?;
         let mut tasks = statement
             .query_map([], row_to_task)?
             .collect::<std::result::Result<Vec<Task>, _>>()?;
@@ -502,13 +561,7 @@ impl Store {
             }
         }
 
-        Ok(Snapshot {
-            revision,
-            projects,
-            sections,
-            labels,
-            tasks,
-        })
+        Ok(tasks)
     }
 
     pub fn mutate(&mut self, mutation: Mutation, revision: u32) -> Result<Snapshot> {
@@ -528,7 +581,30 @@ impl Store {
             Mutation::TaskComplete { id, completed } => complete_task(&tx, &id, completed, &now)?,
             Mutation::TaskDelete { id } => {
                 ensure(exists(&tx, "tasks", &id)?, "事项已被删除。")?;
+                soft_delete(&tx, &id, &now)?;
+            }
+            Mutation::TaskRestore { id } => {
+                ensure(exists(&tx, "tasks", &id)?, "事项已被彻底删除。")?;
+                restore_tree(&tx, &id)?;
+            }
+            Mutation::TaskPurge { id } => {
+                ensure(exists(&tx, "tasks", &id)?, "事项已被彻底删除。")?;
                 tx.execute("DELETE FROM tasks WHERE id=?1", [&id])?;
+            }
+            Mutation::UndoDelete => {
+                let latest: Option<String> = tx
+                    .query_row(
+                        "SELECT deleted_at FROM tasks WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(at) = latest {
+                    tx.execute(
+                        "UPDATE tasks SET deleted_at=NULL WHERE deleted_at=?1",
+                        [&at],
+                    )?;
+                }
             }
             Mutation::TaskToday {
                 id,
@@ -692,6 +768,57 @@ impl Store {
         tx.commit()?;
         self.snapshot()
     }
+}
+
+/// 某一天是否已勾掉：非重复看「完成且落在自己的安排日」，重复看当天完成记录。
+pub fn done_on(task: &Task, day: &str) -> bool {
+    match &task.recurrence {
+        Some(_) => task
+            .completions
+            .iter()
+            .any(|c| c.due_date.as_deref() == Some(day) && c.reopened_at.is_none()),
+        None => task.completed && on_day(task, day),
+    }
+}
+
+/// 视图里要不要出现：当天该做，或当天已经勾掉（重复事项勾完后日期滚走，但当天仍要看得见）。
+pub fn shows_on(task: &Task, day: &str) -> bool {
+    occurs_on(task, day) || done_on(task, day)
+}
+
+/// 删除进回收站：整棵子事项树共用同一个删除时间，恢复时按时间一起捞回来。
+fn soft_delete(conn: &Connection, id: &str, now: &str) -> Result<()> {
+    conn.execute(
+        "WITH RECURSIVE tree(id) AS (
+            SELECT id FROM tasks WHERE id=?1
+            UNION ALL
+            SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
+         )
+         UPDATE tasks SET deleted_at=?2 WHERE id IN (SELECT id FROM tree)",
+        params![id, now],
+    )?;
+    Ok(())
+}
+
+/// 从回收站恢复整棵树（只恢复同一批删除的那部分）。
+fn restore_tree(conn: &Connection, id: &str) -> Result<()> {
+    let at: Option<String> = conn
+        .query_row("SELECT deleted_at FROM tasks WHERE id=?1", [id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    let Some(at) = at else {
+        return Ok(());
+    };
+    conn.execute(
+        "WITH RECURSIVE tree(id) AS (
+            SELECT id FROM tasks WHERE id=?1
+            UNION ALL
+            SELECT t.id FROM tasks t JOIN tree ON t.parent_id = tree.id
+         )
+         UPDATE tasks SET deleted_at=NULL WHERE id IN (SELECT id FROM tree) AND deleted_at=?2",
+        params![id, at],
+    )?;
+    Ok(())
 }
 
 fn complete_task(conn: &Connection, id: &str, completed: bool, now: &str) -> Result<()> {
