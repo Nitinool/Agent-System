@@ -530,8 +530,17 @@ fn upgrading_schema_one_keeps_tasks_days_history_and_backs_up() {
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
-    assert_eq!(backups.len(), 1);
-    assert!(backups[0].extension().is_some_and(|e| e == "sqlite3"));
+    let upgrade_backups: Vec<_> = backups
+        .iter()
+        .filter(|path| {
+            !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("auto-"))
+        })
+        .collect();
+    assert_eq!(upgrade_backups.len(), 1);
+    assert!(upgrade_backups[0].extension().is_some_and(|e| e == "sqlite3"));
 
     // 再打开一次不应重复迁移，也不应多出备份。
     drop(s);
@@ -540,6 +549,13 @@ fn upgrading_schema_one_keeps_tasks_days_history_and_backs_up() {
     assert_eq!(
         std::fs::read_dir(temp.path().join("backups"))
             .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("auto-")
+            })
             .count(),
         1
     );
@@ -757,4 +773,47 @@ fn summary_counts_due_today_and_overdue() {
     let (due, overdue) = s.summary(&today).unwrap();
     assert_eq!(due, 1);
     assert_eq!(overdue, 1);
+}
+
+#[test]
+fn daily_backup_creates_one_file_per_day_and_keeps_seven() {
+    let temp = temporary();
+    let path = temp.path().join("tasks.sqlite3");
+    let mut s = Store::open(&path).unwrap();
+    for d in 0..3 {
+        add(&mut s, {
+            let mut item = draft(None, None);
+            item.title = format!("事项 {d}");
+            item
+        });
+    }
+    let first = Store::open(&path).unwrap();
+    drop(first);
+    let directory = temp.path().join("backups");
+    let auto: Vec<_> = std::fs::read_dir(&directory)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.starts_with("auto-"))
+        .collect();
+    // 同一天只留一份，重复打开不会堆叠。
+    assert_eq!(auto.len(), 1);
+
+    // 造 9 份历史自动备份，确认只保留最近 7 份。
+    for day in 1..=9 {
+        std::fs::write(directory.join(format!("auto-2026010{day}.sqlite3")), b"x").unwrap();
+    }
+    let source = std::fs::read(directory.join(&auto[0])).unwrap();
+    std::fs::write(directory.join(auto[0].clone()), source).unwrap();
+    let reopened = Store::open(&path).unwrap();
+    drop(reopened);
+    let mut names: Vec<_> = std::fs::read_dir(&directory)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.starts_with("auto-"))
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 7, "应只保留最近 7 份：{names:?}");
+    assert!(names.iter().all(|name| !name.starts_with("auto-20260101")));
 }

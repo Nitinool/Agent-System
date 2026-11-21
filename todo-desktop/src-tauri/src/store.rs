@@ -396,6 +396,8 @@ impl Store {
             3 => migrate::upgrade_3_to_4(&mut conn)?,
             _ => {}
         }
+        // 每天首次打开留一份自动备份。
+        let _ = migrate::daily_backup(&conn, path);
         // 回收站保留 30 天，超期清理。
         let cutoff = (Local::now() - chrono::Duration::days(30)).to_rfc3339();
         conn.execute(

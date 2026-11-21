@@ -172,6 +172,37 @@ pub fn backup_now(conn: &Connection, database: &Path) -> Result<PathBuf> {
     backup(conn, database)
 }
 
+/// 每天首次打开留一份快照，只保留最近 7 份 `auto-*.sqlite3`，不动升级时的备份。
+pub fn daily_backup(conn: &Connection, database: &Path) -> Result<Option<PathBuf>> {
+    let directory = database
+        .parent()
+        .ok_or_else(|| AppError::new("io", "无法确定事项便签数据目录。"))?
+        .join("backups");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!("auto-{}.sqlite3", Local::now().format("%Y%m%d")));
+    let created = if path.exists() {
+        None
+    } else {
+        conn.backup(DatabaseName::Main, &path, None)?;
+        Some(path.clone())
+    };
+    let mut automatic: Vec<PathBuf> = std::fs::read_dir(&directory)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("auto-") && name.ends_with(".sqlite3"))
+        })
+        .collect();
+    automatic.sort();
+    while automatic.len() > 7 {
+        let oldest = automatic.remove(0);
+        let _ = std::fs::remove_file(oldest);
+    }
+    Ok(created)
+}
+
 /// schema 1 → 2。先备份，再在一个事务里改名旧表、建新表、逐条搬运；任何一步失败都回滚。
 pub fn upgrade_from_1(conn: &mut Connection, database: &Path) -> Result<PathBuf> {
     let saved = backup(conn, database)?;
