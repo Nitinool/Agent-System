@@ -173,8 +173,6 @@ async fn sync_run(state: tauri::State<'_, State>) -> Result<crate::sync::Report>
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut store = db.lock().map_err(|_| interrupted())?;
-        // 同步前先留一份快照，出问题能回到同步前。
-        store.backup_to(&directory.join("tasks.sqlite3"))?;
         let report = crate::sync::run(&directory, &mut store)?;
         let mut settings = crate::settings::load(&directory);
         settings.sync_last_at = Some(chrono::Local::now().to_rfc3339());

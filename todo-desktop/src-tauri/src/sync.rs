@@ -342,6 +342,8 @@ fn upload(
 
 pub fn run(directory: &Path, store: &mut Store) -> Result<Report> {
     let token = load_token(directory)?;
+    // 同步前先留一份快照，出问题能回到同步前。
+    store.backup_to(&directory.join("tasks.sqlite3"))?;
     let client = client()?;
     let remote = fetch(&client, &token)?;
     let (sha, remote_payload) = match remote {
